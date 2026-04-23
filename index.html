@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0e2a47">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="A320 Planner">
+  <title>Fenix A320 Route Planner</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">VATSIM + public aviation data</p>
+        <h1>Fenix A320 Route Planner</h1>
+        <p class="lede">
+          Departure-time based route suggestions for the Fenix A320 with live public VATSIM ATC coverage,
+          Pacific-to-Zulu conversion, daylight awareness, and realistic airline guidance.
+        </p>
+      </div>
+      <div class="hero-card glass">
+        <div class="hero-metric">
+          <span class="label">Home Airport</span>
+          <strong>KSAN</strong>
+        </div>
+        <div class="hero-metric">
+          <span class="label">Aircraft</span>
+          <strong>Fenix A320</strong>
+        </div>
+        <div class="hero-metric">
+          <span class="label">Time Input</span>
+          <strong>Pacific Local</strong>
+        </div>
+      </div>
+    </header>
+
+    <main class="grid">
+      <section class="panel glass">
+        <h2>Flight Window</h2>
+        <form id="planner-form">
+          <div class="field-grid">
+            <label>
+              <span>Departure date</span>
+              <input id="departure-date" name="departureDate" type="date" required>
+            </label>
+            <label>
+              <span>Off-block time (Pacific)</span>
+              <input id="departure-time" name="departureTime" type="time" required>
+            </label>
+            <label>
+              <span>On-block time (Pacific)</span>
+              <input id="arrival-time" name="arrivalTime" type="time" required>
+            </label>
+            <label>
+              <span>Home airport bias</span>
+              <input id="home-airport" name="homeAirport" type="text" value="KSAN" maxlength="4" pattern="[A-Za-z]{4}" required>
+            </label>
+          </div>
+
+          <div class="field-grid">
+            <label>
+              <span>Preferred regions</span>
+              <select id="regions" name="regions" multiple size="3">
+                <option value="NA" selected>North America</option>
+                <option value="EU" selected>Europe</option>
+                <option value="MIXED">Mixed / either</option>
+              </select>
+              <small>Hold Ctrl/Cmd to select multiple on desktop. On iPad, leave defaults or toggle presets below.</small>
+            </label>
+
+            <label>
+              <span>Daylight preference</span>
+              <select id="daylight-preference" name="daylightPreference">
+                <option value="prefer-daylight" selected>Prefer daylight</option>
+                <option value="balanced">Balanced</option>
+                <option value="night-ok">Night is okay</option>
+              </select>
+            </label>
+
+            <label>
+              <span>Coverage priority</span>
+              <select id="coverage-priority" name="coveragePriority">
+                <option value="high" selected>Favor stronger ATC coverage</option>
+                <option value="balanced">Balanced</option>
+                <option value="route-first">Favor route realism first</option>
+              </select>
+            </label>
+
+            <label>
+              <span>Results</span>
+              <select id="result-count" name="resultCount">
+                <option value="5" selected>Top 5</option>
+                <option value="8">Top 8</option>
+                <option value="10">Top 10</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="preset-row" role="group" aria-label="Region presets">
+            <button type="button" class="secondary" data-region-preset="NA">North America</button>
+            <button type="button" class="secondary" data-region-preset="EU">Europe</button>
+            <button type="button" class="secondary" data-region-preset="BOTH">NA + Europe</button>
+          </div>
+
+          <div class="actions">
+            <button type="submit" id="plan-button">Find Routes</button>
+            <button type="button" class="secondary" id="refresh-button">Refresh ATC Snapshot</button>
+          </div>
+        </form>
+      </section>
+
+      <aside class="panel glass">
+        <h2>Current Timing</h2>
+        <div id="time-summary" class="summary-stack">
+          <p>Enter a departure date and Pacific local off-block/on-block times to compute your Zulu window.</p>
+        </div>
+        <div class="divider"></div>
+        <h2>Live Data Status</h2>
+        <div id="network-status" class="summary-stack">
+          <p>No live VATSIM snapshot loaded yet.</p>
+        </div>
+      </aside>
+    </main>
+
+    <section class="panel glass">
+      <div class="section-head">
+        <div>
+          <h2>Suggested Routes</h2>
+          <p class="muted">All airport codes shown as ICAO. Gate and terminal info is estimated unless specifically noted.</p>
+        </div>
+        <div id="result-meta" class="pill">Waiting for input</div>
+      </div>
+      <div id="results" class="results">
+        <article class="empty-state">
+          <h3>Ready when you are</h3>
+          <p>
+            This planner will combine your Pacific local flight window, convert it to UTC/Zulu, inspect the live
+            public VATSIM network, and rank realistic A320-family routes by coverage, timing fit, and airline realism.
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel glass">
+      <h2>Notes</h2>
+      <ul class="notes">
+        <li>Coverage is based on the current public VATSIM snapshot, so the app is most useful for near-term departures.</li>
+        <li>Route realism comes from public airport, airline, and historical route datasets. Some flight numbers and gate ranges are best-effort estimates.</li>
+        <li>Pacific local input uses the actual date, so daylight saving time is handled correctly instead of fixed PST math.</li>
+      </ul>
+    </section>
+  </div>
+
+  <template id="result-card-template">
+    <article class="result-card">
+      <div class="result-top">
+        <div>
+          <p class="eyebrow"></p>
+          <h3 class="route-title"></h3>
+        </div>
+        <div class="score-badge"></div>
+      </div>
+      <div class="detail-grid"></div>
+      <div class="coverage-strip"></div>
+      <p class="why-fit"></p>
+    </article>
+  </template>
+
+  <script src="./app.js" defer></script>
+</body>
+</html>

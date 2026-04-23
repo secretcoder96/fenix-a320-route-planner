@@ -1,0 +1,9 @@
+{
+  "name": "Fenix A320 Route Planner",
+  "short_name": "A320 Planner",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#0b1b2b",
+  "theme_color": "#0e2a47",
+  "description": "iPad-friendly Fenix A320 route planner using public VATSIM and aviation data."
+}
