@@ -460,17 +460,7 @@ function renderResults(routes, input) {
 
     const exportBlock = fragment.querySelector(".export-block");
     exportBlock.value = buildSimbriefBlock(candidate, input);
-    fragment.querySelector(".copy-export-button").addEventListener("click", async () => {
-      try {
-        await navigator.clipboard.writeText(exportBlock.value);
-        fragment.querySelector(".copy-export-button").textContent = "Copied";
-        setTimeout(() => {
-          fragment.querySelector(".copy-export-button").textContent = "Copy SimBrief Block";
-        }, 1500);
-      } catch {
-        exportBlock.select();
-      }
-    });
+    fragment.querySelector(".simbrief-link").href = buildSimbriefDispatchUrl(candidate, input);
 
     const saveButton = fragment.querySelector(".save-route-button");
     const favoriteKey = `${candidate.route.from}-${candidate.route.to}-${candidate.airline.code}`;
@@ -590,6 +580,26 @@ function buildSimbriefBlock(candidate, input) {
   ].join("\n");
 }
 
+function buildSimbriefDispatchUrl(candidate, input) {
+  const url = new URL("https://dispatch.simbrief.com/options/custom");
+  const departureHour = String(input.depUtc.getUTCHours()).padStart(2, "0");
+  const departureMinute = String(input.depUtc.getUTCMinutes()).padStart(2, "0");
+  const flightNumberOnly = candidate.flightNumber.replace(candidate.airline.code, "");
+
+  url.searchParams.set("airline", candidate.airline.code);
+  url.searchParams.set("fltnum", flightNumberOnly);
+  url.searchParams.set("type", "A320");
+  url.searchParams.set("orig", candidate.route.from);
+  url.searchParams.set("dest", candidate.route.to);
+  url.searchParams.set("deph", departureHour);
+  url.searchParams.set("depm", departureMinute);
+  url.searchParams.set("steh", String(Math.floor(candidate.estimatedBlockMinutes / 60)));
+  url.searchParams.set("stem", String(candidate.estimatedBlockMinutes % 60).padStart(2, "0"));
+  url.searchParams.set("callsign", candidate.flightNumber);
+
+  return url.toString();
+}
+
 function toggleFavorite(candidate, input) {
   const favorites = loadFavorites();
   const key = `${candidate.route.from}-${candidate.route.to}-${candidate.airline.code}`;
@@ -608,6 +618,7 @@ function toggleFavorite(candidate, input) {
       gateInfo: candidate.gateInfo,
       savedAt: new Date().toISOString(),
       exportBlock: buildSimbriefBlock(candidate, input),
+      simbriefUrl: buildSimbriefDispatchUrl(candidate, input),
     });
   }
 
@@ -656,18 +667,12 @@ function renderFavorites() {
       <p><strong>Estimated block:</strong> ${favorite.block}</p>
       <p><strong>Terminal / gate:</strong> ${favorite.gateInfo}</p>
       <div class="card-actions">
-        <button type="button" class="secondary copy-favorite-export">Copy SimBrief Block</button>
+        <a class="secondary simbrief-link favorite-simbrief-link" target="_blank" rel="noopener noreferrer">Open in SimBrief</a>
         <button type="button" class="secondary remove-favorite">Remove</button>
       </div>
     `;
 
-    card.querySelector(".copy-favorite-export").addEventListener("click", async () => {
-      try {
-        await navigator.clipboard.writeText(favorite.exportBlock);
-      } catch {
-        console.warn("Clipboard copy failed for favorite.");
-      }
-    });
+    card.querySelector(".favorite-simbrief-link").href = favorite.simbriefUrl;
 
     card.querySelector(".remove-favorite").addEventListener("click", () => {
       const filtered = loadFavorites().filter((item) => item.key !== favorite.key);
