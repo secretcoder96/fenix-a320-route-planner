@@ -9,13 +9,14 @@ const AIRBUS_EQUIPMENT_CODES = new Set([
   "318", "319", "320", "321", "32A", "32B", "32N", "32Q", "32S", "319 320 321",
 ]);
 
-const AIRLINE_TERMINAL_HINTS = {
+const TERMINAL_GATE_DATABASE = {
   KSAN: {
-    ASA: "Terminal 2, gates around 20-31 are the most likely estimate.",
-    AAL: "Terminal 2 East, often around gates 46-50 or nearby; estimate only.",
-    DAL: "Terminal 2 West, often low-40s gate area; estimate only.",
+    ASA: "Terminal 2, commonly west side gates around 20-31; public-terminal estimate.",
+    AAL: "Terminal 2 East, often around gates 46-50 or nearby; public-terminal estimate.",
+    DAL: "Terminal 2 West, often low-40s gate area; public-terminal estimate.",
     JBU: "Terminal 2, mid-20s to low-30s gate area is a reasonable estimate.",
     UAL: "Terminal 2, high-30s to low-40s area is a reasonable estimate.",
+    SWA: "Terminal 1 West or Terminal 2 depending on operation; gate range estimate only.",
   },
   KLAX: {
     AAL: "Terminal 4/5 area is the strongest estimate for American mainline narrowbody ops.",
@@ -23,6 +24,7 @@ const AIRLINE_TERMINAL_HINTS = {
     UAL: "Terminal 7/8 is the most likely United estimate.",
     JBU: "Terminal 5 is the best estimate for JetBlue.",
     ASA: "Terminal 6 is the best estimate for Alaska.",
+    SWA: "Terminal 1 is the most likely Southwest estimate.",
   },
   KSFO: {
     UAL: "Terminal 3 is the strongest estimate for United domestic A320-family service.",
@@ -41,11 +43,13 @@ const AIRLINE_TERMINAL_HINTS = {
     AAL: "Terminal 4 is the strongest estimate for American.",
     DAL: "Terminal 3 is the best Delta estimate.",
     UAL: "Terminal 3 is the best United estimate.",
+    SWA: "Terminal 4 is the strongest Southwest estimate.",
   },
   KDEN: {
     UAL: "Concourse B is the strongest estimate for United.",
     DAL: "Concourse A is the best Delta estimate.",
     AAL: "Concourse A is the best American estimate.",
+    SWA: "Concourse C is the strongest Southwest estimate.",
   },
   CYVR: {
     ACA: "Domestic gates at C gates are the best Air Canada estimate.",
@@ -67,6 +71,10 @@ const AIRLINE_TERMINAL_HINTS = {
     VLG: "Terminal 1 is the strongest Vueling estimate.",
     IBE: "Terminal 1 is the strongest Iberia estimate.",
   },
+  LPPT: {
+    TAP: "Terminal 1 is the strongest TAP short-haul estimate.",
+    EZY: "Terminal 1 is a reasonable easyJet estimate.",
+  },
   EDDF: {
     DLH: "Terminal 1, concourses A/B is the strongest Lufthansa estimate.",
   },
@@ -82,9 +90,11 @@ const PREFERRED_A320_AIRLINES = new Set([
 
 const form = document.getElementById("planner-form");
 const resultsEl = document.getElementById("results");
+const favoritesEl = document.getElementById("favorites");
 const timeSummaryEl = document.getElementById("time-summary");
 const networkStatusEl = document.getElementById("network-status");
 const resultMetaEl = document.getElementById("result-meta");
+const favoritesMetaEl = document.getElementById("favorites-meta");
 const planButton = document.getElementById("plan-button");
 const refreshButton = document.getElementById("refresh-button");
 const template = document.getElementById("result-card-template");
@@ -106,6 +116,7 @@ async function init() {
   hydratePreferences();
   bindEvents();
   updateTimeSummary();
+  renderFavorites();
   registerServiceWorker();
   await loadReferenceData();
   await refreshNetwork();
@@ -411,16 +422,21 @@ function renderResults(routes, input) {
 
   for (const candidate of routes) {
     const fragment = template.content.cloneNode(true);
-    fragment.querySelector(".eyebrow").textContent = `${candidate.airline.name} • ${candidate.flightNumber}`;
+    fragment.querySelector(".eyebrow").textContent = `${candidate.airline.code} • ${candidate.airline.name}`;
     fragment.querySelector(".route-title").textContent = `${candidate.route.from} → ${candidate.route.to}`;
     fragment.querySelector(".score-badge").textContent = candidate.coverage.label;
 
     const details = [
       ["Estimated block", formatMinutes(candidate.estimatedBlockMinutes)],
-      ["Airline", `${candidate.airline.name} (${candidate.airline.code})`],
+      ["Airline ICAO", candidate.airline.code],
+      ["Airline name", candidate.airline.name],
+      ["Suggested flight number", candidate.flightNumber],
+      ["SimBrief origin / destination", `${candidate.route.from} / ${candidate.route.to}`],
       ["Departure local", `${candidate.route.from} ${candidate.depLocal}`],
       ["Arrival local", `${candidate.route.to} ${candidate.arrLocal}`],
       ["Zulu timing", `${formatZulu(input.depUtc)} to ${formatZulu(candidate.arrEstimateUtc)}`],
+      ["Departure ATC online", candidate.coverage.depPositions.summary],
+      ["Arrival ATC online", candidate.coverage.arrPositions.summary],
       ["Likely gate / terminal", candidate.gateInfo],
       ["Coverage outlook", candidate.coverage.description],
       ["Why it fits", `${Math.round(candidate.distanceNm)} nm stage length, realistic for an A320-family rotation.`],
@@ -442,6 +458,32 @@ function renderResults(routes, input) {
       strip.appendChild(node);
     });
 
+    const exportBlock = fragment.querySelector(".export-block");
+    exportBlock.value = buildSimbriefBlock(candidate, input);
+    fragment.querySelector(".copy-export-button").addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(exportBlock.value);
+        fragment.querySelector(".copy-export-button").textContent = "Copied";
+        setTimeout(() => {
+          fragment.querySelector(".copy-export-button").textContent = "Copy SimBrief Block";
+        }, 1500);
+      } catch {
+        exportBlock.select();
+      }
+    });
+
+    const saveButton = fragment.querySelector(".save-route-button");
+    const favoriteKey = `${candidate.route.from}-${candidate.route.to}-${candidate.airline.code}`;
+    if (isFavorite(favoriteKey)) {
+      saveButton.textContent = "Saved";
+    }
+    saveButton.addEventListener("click", () => {
+      toggleFavorite(candidate, input);
+      const nowSaved = isFavorite(favoriteKey);
+      saveButton.textContent = nowSaved ? "Saved" : "Save Route";
+      renderFavorites();
+    });
+
     fragment.querySelector(".why-fit").textContent = candidate.whyFit;
     resultsEl.appendChild(fragment);
   }
@@ -449,18 +491,15 @@ function renderResults(routes, input) {
 
 function scoreCoverage(depIcao, arrIcao) {
   const controllers = state.network?.controllers ?? [];
-  const airportMatches = controllers.filter((controller) => {
-    const callsign = controller.callsign ?? "";
-    return callsign.startsWith(`${depIcao}_`) || callsign.startsWith(`${arrIcao}_`);
-  });
-
-  const depMatches = airportMatches.filter((c) => c.callsign.startsWith(`${depIcao}_`));
-  const arrMatches = airportMatches.filter((c) => c.callsign.startsWith(`${arrIcao}_`));
+  const depMatches = controllers.filter((controller) => (controller.callsign ?? "").startsWith(`${depIcao}_`));
+  const arrMatches = controllers.filter((controller) => (controller.callsign ?? "").startsWith(`${arrIcao}_`));
   const centerMatches = controllers.filter((controller) => /_(CTR|APP|DEP)$/.test(controller.callsign ?? ""));
 
   const depHasTower = depMatches.some((c) => /_(DEL|GND|TWR|APP|DEP)$/.test(c.callsign));
   const arrHasTower = arrMatches.some((c) => /_(DEL|GND|TWR|APP|DEP)$/.test(c.callsign));
   const enrouteBonus = Math.min(centerMatches.length, 12);
+  const depPositions = summarizeAirportPositions(depMatches);
+  const arrPositions = summarizeAirportPositions(arrMatches);
 
   let score = (depMatches.length * 10) + (arrMatches.length * 10) + enrouteBonus;
   let label = "Light coverage";
@@ -482,7 +521,7 @@ function scoreCoverage(depIcao, arrIcao) {
     { text: `${centerMatches.length} wider enroute APP/CTR positions online`, tone: centerMatches.length >= 8 ? "good" : centerMatches.length >= 3 ? "warn" : "low" },
   ];
 
-  return { score, label, description, chips };
+  return { score, label, description, chips, depPositions, arrPositions };
 }
 
 function computeDaylightScore(preference, depUtc, arrUtc, depTz, arrTz) {
@@ -531,9 +570,162 @@ function buildWhyFit(route, airline, estimatedBlockMinutes, coverage, blockDelta
   return pieces.join(" ");
 }
 
+function buildSimbriefBlock(candidate, input) {
+  return [
+    `Airline ICAO: ${candidate.airline.code}`,
+    `Airline Name: ${candidate.airline.name}`,
+    `Flight Number: ${candidate.flightNumber.replace(candidate.airline.code, "")}`,
+    `Callsign / Flight: ${candidate.flightNumber}`,
+    `Aircraft: Fenix A320`,
+    `Origin ICAO: ${candidate.route.from}`,
+    `Destination ICAO: ${candidate.route.to}`,
+    `Off-block Pacific: ${input.departureDate} ${input.departureTime}`,
+    `On-block Pacific: ${input.arrivalTime}`,
+    `Planned Zulu Off-block: ${formatZulu(input.depUtc)}`,
+    `Estimated Zulu On-block: ${formatZulu(candidate.arrEstimateUtc)}`,
+    `Estimated Block Time: ${formatMinutes(candidate.estimatedBlockMinutes)}`,
+    `Departure ATC Online: ${candidate.coverage.depPositions.summary}`,
+    `Arrival ATC Online: ${candidate.coverage.arrPositions.summary}`,
+    `Estimated Terminal/Gate: ${candidate.gateInfo}`,
+  ].join("\n");
+}
+
+function toggleFavorite(candidate, input) {
+  const favorites = loadFavorites();
+  const key = `${candidate.route.from}-${candidate.route.to}-${candidate.airline.code}`;
+  const existingIndex = favorites.findIndex((item) => item.key === key);
+
+  if (existingIndex >= 0) {
+    favorites.splice(existingIndex, 1);
+  } else {
+    favorites.unshift({
+      key,
+      route: `${candidate.route.from} → ${candidate.route.to}`,
+      airlineCode: candidate.airline.code,
+      airlineName: candidate.airline.name,
+      flightNumber: candidate.flightNumber,
+      block: formatMinutes(candidate.estimatedBlockMinutes),
+      gateInfo: candidate.gateInfo,
+      savedAt: new Date().toISOString(),
+      exportBlock: buildSimbriefBlock(candidate, input),
+    });
+  }
+
+  localStorage.setItem("fenixA320PlannerFavorites", JSON.stringify(favorites.slice(0, 12)));
+}
+
+function loadFavorites() {
+  const raw = localStorage.getItem("fenixA320PlannerFavorites");
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function isFavorite(key) {
+  return loadFavorites().some((item) => item.key === key);
+}
+
+function renderFavorites() {
+  const favorites = loadFavorites();
+  favoritesMetaEl.textContent = `${favorites.length} saved`;
+
+  if (!favorites.length) {
+    favoritesEl.innerHTML = `
+      <article class="empty-state">
+        <h3>No favorites yet</h3>
+        <p>Use the save button on any suggested route to keep it handy for later.</p>
+      </article>
+    `;
+    return;
+  }
+
+  favoritesEl.innerHTML = "";
+  favorites.forEach((favorite) => {
+    const card = document.createElement("article");
+    card.className = "favorite-card";
+    card.innerHTML = `
+      <h3>${favorite.route}</h3>
+      <p><strong>${favorite.airlineCode}</strong> • ${favorite.airlineName} • ${favorite.flightNumber}</p>
+      <p><strong>Estimated block:</strong> ${favorite.block}</p>
+      <p><strong>Terminal / gate:</strong> ${favorite.gateInfo}</p>
+      <div class="card-actions">
+        <button type="button" class="secondary copy-favorite-export">Copy SimBrief Block</button>
+        <button type="button" class="secondary remove-favorite">Remove</button>
+      </div>
+    `;
+
+    card.querySelector(".copy-favorite-export").addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(favorite.exportBlock);
+      } catch {
+        console.warn("Clipboard copy failed for favorite.");
+      }
+    });
+
+    card.querySelector(".remove-favorite").addEventListener("click", () => {
+      const filtered = loadFavorites().filter((item) => item.key !== favorite.key);
+      localStorage.setItem("fenixA320PlannerFavorites", JSON.stringify(filtered));
+      renderFavorites();
+    });
+
+    favoritesEl.appendChild(card);
+  });
+}
+
+function summarizeAirportPositions(controllers) {
+  const order = ["DEL", "GND", "TWR", "APP", "DEP", "CTR", "ATIS", "FSS"];
+  const labels = {
+    DEL: "Clearance / Delivery",
+    GND: "Ground",
+    TWR: "Tower",
+    APP: "Approach",
+    DEP: "Departure",
+    CTR: "Center",
+    ATIS: "ATIS",
+    FSS: "FSS",
+  };
+
+  const present = new Set();
+  controllers.forEach((controller) => {
+    const match = (controller.callsign ?? "").match(/_([A-Z]+)$/);
+    if (match) {
+      present.add(match[1]);
+    }
+  });
+
+  const ordered = order.filter((code) => present.has(code));
+  if (!ordered.length) {
+    return {
+      codes: [],
+      summary: "No local ATC positions online in the current VATSIM snapshot.",
+    };
+  }
+
+  const formatted = ordered.map((code) => labels[code] ?? code);
+  let summary = formatted.join(", ");
+
+  if ((present.has("APP") || present.has("DEP")) && !present.has("TWR")) {
+    summary += ". APP/DEP would typically provide top-down coverage for tower and ground as needed on VATSIM.";
+  } else if (present.has("CTR") && !present.has("APP") && !present.has("DEP") && !present.has("TWR")) {
+    summary += ". CTR may be providing limited top-down coverage depending on local procedures.";
+  }
+
+  return {
+    codes: ordered,
+    summary,
+  };
+}
+
 function buildGateInfo(depIcao, arrIcao, airlineCode) {
-  const depHint = AIRLINE_TERMINAL_HINTS[depIcao]?.[airlineCode] ?? "Likely a mainline narrowbody terminal or domestic/Schengen pier estimate only.";
-  const arrHint = AIRLINE_TERMINAL_HINTS[arrIcao]?.[airlineCode] ?? "Likely a mainline narrowbody terminal or domestic/Schengen pier estimate only.";
+  const depHint = TERMINAL_GATE_DATABASE[depIcao]?.[airlineCode] ?? "Likely a mainline narrowbody terminal or domestic/Schengen pier estimate only.";
+  const arrHint = TERMINAL_GATE_DATABASE[arrIcao]?.[airlineCode] ?? "Likely a mainline narrowbody terminal or domestic/Schengen pier estimate only.";
   return `Dep: ${depHint} Arr: ${arrHint}`;
 }
 

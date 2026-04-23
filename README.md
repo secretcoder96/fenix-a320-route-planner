@@ -11,6 +11,9 @@ Static iPad-friendly web app for choosing realistic Fenix A320 routes using:
 - Takes Pacific local off-block and on-block input and converts it to UTC/Zulu using the actual date
 - Scores realistic A320-family routes in North America and Europe
 - Uses the live public VATSIM snapshot to favor routes with stronger current ATC coverage
+- Shows specific local ATC roles online at each airport, including top-down notes for APP/DEP coverage
+- Generates a SimBrief-ready export block for each suggested route
+- Lets you save favorite routes locally in the browser for quick reuse on iPad
 - Stores preferences in local browser storage
 - Works well in Safari on iPad and can be added to the Home Screen
 

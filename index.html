@@ -147,6 +147,22 @@
     </section>
 
     <section class="panel glass">
+      <div class="section-head">
+        <div>
+          <h2>Saved Favorites</h2>
+          <p class="muted">Quick reuse for routes you want to come back to on iPad.</p>
+        </div>
+        <div id="favorites-meta" class="pill">0 saved</div>
+      </div>
+      <div id="favorites" class="results">
+        <article class="empty-state">
+          <h3>No favorites yet</h3>
+          <p>Use the save button on any suggested route to keep it handy for later.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel glass">
       <h2>Notes</h2>
       <ul class="notes">
         <li>Coverage is based on the current public VATSIM snapshot, so the app is most useful for near-term departures.</li>
@@ -167,6 +183,14 @@
       </div>
       <div class="detail-grid"></div>
       <div class="coverage-strip"></div>
+      <div class="card-actions">
+        <button type="button" class="secondary save-route-button">Save Route</button>
+        <button type="button" class="secondary copy-export-button">Copy SimBrief Block</button>
+      </div>
+      <div class="export-panel">
+        <p class="export-title">SimBrief-ready export block</p>
+        <textarea class="export-block" rows="8" readonly></textarea>
+      </div>
       <p class="why-fit"></p>
     </article>
   </template>

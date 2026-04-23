@@ -160,7 +160,8 @@ select[multiple] {
 .actions,
 .section-head,
 .result-top,
-.coverage-strip {
+.coverage-strip,
+.card-actions {
   display: flex;
   gap: 10px;
   align-items: center;
@@ -278,6 +279,33 @@ button:disabled {
   margin-top: 14px;
 }
 
+.card-actions {
+  margin-top: 14px;
+}
+
+.export-panel {
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(16, 34, 49, 0.05);
+}
+
+.export-title {
+  margin: 0 0 8px;
+  font-weight: 700;
+}
+
+.export-block {
+  width: 100%;
+  min-height: 180px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  resize: vertical;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--ink);
+}
+
 .coverage-chip {
   padding: 8px 12px;
   border-radius: 999px;
@@ -302,6 +330,22 @@ button:disabled {
 
 .why-fit {
   margin: 14px 0 0;
+}
+
+.favorite-card {
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.favorite-card h3,
+.favorite-card p {
+  margin: 0;
+}
+
+.favorite-card p + p {
+  margin-top: 6px;
 }
 
 @media (max-width: 900px) {
