@@ -107,9 +107,30 @@
             <button type="button" class="secondary" data-region-preset="BOTH">NA + Europe</button>
           </div>
 
+          <div class="option-row" aria-label="Route variety options">
+            <label class="check-option" data-na-only>
+              <input id="prefer-socal" name="preferSocal" type="checkbox" checked>
+              <span>Prefer San Diego / SoCal</span>
+            </label>
+            <label class="check-option">
+              <input id="more-variety" name="moreVariety" type="checkbox">
+              <span>More variety</span>
+            </label>
+            <label class="check-option">
+              <input id="avoid-recent" name="avoidRecent" type="checkbox" checked>
+              <span>Avoid recently suggested routes</span>
+            </label>
+            <label class="check-option" data-na-only>
+              <input id="include-na-international" name="includeNaInternational" type="checkbox" checked>
+              <span>Include Canada / Mexico</span>
+            </label>
+          </div>
+
           <div class="actions">
             <button type="submit" id="plan-button">Find Routes</button>
             <button type="button" class="secondary" id="refresh-button">Refresh ATC Snapshot</button>
+            <button type="button" class="secondary" id="surprise-button">Surprise Me</button>
+            <button type="button" class="secondary" id="clear-history-button">Clear Route History</button>
           </div>
         </form>
       </section>

@@ -157,6 +157,7 @@ select[multiple] {
 }
 
 .preset-row,
+.option-row,
 .actions,
 .section-head,
 .result-top,
@@ -172,6 +173,30 @@ select[multiple] {
 .preset-row,
 .actions {
   margin-top: 16px;
+}
+
+.option-row {
+  margin-top: 14px;
+  justify-content: flex-start;
+}
+
+.check-option {
+  display: inline-flex;
+  width: auto;
+  min-height: 42px;
+  padding: 8px 12px;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.58);
+  font-size: 0.92rem;
+}
+
+.check-option input {
+  width: 18px;
+  min-height: 18px;
+  padding: 0;
 }
 
 button {

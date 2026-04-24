@@ -85,13 +85,14 @@ const TERMINAL_GATE_DATABASE = {
 };
 
 const PREFERRED_A320_AIRLINES = new Set([
-  "AAL", "DAL", "UAL", "ASA", "JBU", "ACA", "WJA", "BAW", "EZY", "IBE", "VLG", "AFR", "KLM", "DLH", "EIN", "TAP", "SAS", "CFG", "BTI", "SWR",
+  "AAL", "DAL", "UAL", "ASA", "JBU", "ACA", "WJA", "AMX", "BAW", "EZY", "IBE", "VLG", "AFR", "KLM", "DLH", "EIN", "TAP", "SAS", "CFG", "BTI", "SWR", "WZZ",
 ]);
 
 const MANUAL_AIRLINE_NAMES = {
   AAL: "American Airlines",
   ACA: "Air Canada",
   AFR: "Air France",
+  AMX: "Aeromexico",
   ASA: "Alaska Airlines",
   BAW: "British Airways",
   BTI: "airBaltic",
@@ -111,12 +112,108 @@ const MANUAL_AIRLINE_NAMES = {
   UAL: "United Airlines",
   VLG: "Vueling",
   WJA: "WestJet",
+  WZZ: "Wizz Air",
   RYR: "Ryanair",
 };
 
 const FAVORITES_STORAGE_KEY = "fenixA320PlannerFavorites";
 const FAVORITES_STORAGE_VERSION_KEY = "fenixA320PlannerFavoritesVersion";
 const FAVORITES_STORAGE_VERSION = "2";
+const RECENT_ROUTES_STORAGE_KEY = "fenixA320PlannerRecentRoutes";
+const RECENT_ROUTES_LIMIT = 18;
+
+const SOCAL_AIRPORTS = new Set(["KSAN", "KLAX", "KSNA", "KONT", "KBUR", "KLGB", "KPSP", "MMTJ"]);
+
+const MANUAL_ROUTES = [
+  ...buildManualRoutes("NA", "ASA", [
+    ["KSAN", "KLAX", "socal short"], ["KSAN", "KSFO", "socal west"], ["KSAN", "KOAK", "socal west"],
+    ["KSAN", "KSJC", "socal west"], ["KSAN", "KSMF", "socal west"], ["KSAN", "KSEA", "socal pnw"],
+    ["KSAN", "KPDX", "socal pnw"], ["KLAX", "KSEA", "west pnw"], ["KLAX", "KPDX", "west pnw"],
+    ["KSFO", "KSEA", "west pnw"], ["KSFO", "KPDX", "west pnw"], ["KLAS", "KSEA", "southwest pnw"],
+    ["KSEA", "KLAX", "pnw west"], ["KSEA", "KSFO", "pnw west"], ["KPDX", "KLAX", "pnw west"],
+  ]),
+  ...buildManualRoutes("NA", "SWA", [
+    ["KSAN", "KLAS", "socal southwest"], ["KSAN", "KPHX", "socal southwest"], ["KSAN", "KABQ", "socal southwest"],
+    ["KSAN", "KELP", "socal southwest"], ["KSAN", "KAUS", "socal texas"], ["KSAN", "KDAL", "socal texas"],
+    ["KLAX", "KLAS", "west southwest"], ["KLAX", "KPHX", "west southwest"], ["KSNA", "KLAS", "socal southwest"],
+    ["KSNA", "KPHX", "socal southwest"], ["KLGB", "KLAS", "socal southwest"], ["KPHX", "KSAN", "return-socal"],
+    ["KLAS", "KSAN", "return-socal"], ["KABQ", "KSAN", "return-socal"], ["KELP", "KSAN", "return-socal"],
+    ["KDAL", "KSAN", "return-socal"], ["KDAL", "KHOU", "texas"], ["KAUS", "KDEN", "texas mountain"],
+    ["KHOU", "KMSY", "texas southeast"], ["KMDW", "KLGA", "midwest east"],
+  ]),
+  ...buildManualRoutes("NA", "AAL", [
+    ["KSAN", "KDFW", "socal texas"], ["KLAX", "KDFW", "west texas"], ["KLAX", "KORD", "west midwest"],
+    ["KDFW", "KJFK", "texas east"], ["KDFW", "KMIA", "texas florida"], ["KDFW", "MMUN", "texas mexico international"],
+    ["KDFW", "MMMX", "texas mexico international"], ["KORD", "KBOS", "midwest east"], ["KORD", "KLGA", "midwest east"],
+    ["KORD", "CYYZ", "midwest canada international"], ["KPHX", "KORD", "southwest midwest"], ["KPHX", "KCLT", "southwest east"],
+    ["KCLT", "KBOS", "southeast east"], ["KCLT", "KMCO", "southeast florida"], ["KCLT", "KRDU", "southeast"],
+  ]),
+  ...buildManualRoutes("NA", "DAL", [
+    ["KLAX", "KATL", "west southeast"], ["KLAX", "KBOS", "west east"], ["KLAX", "KMIA", "west florida"],
+    ["KSEA", "KORD", "pnw midwest"], ["KSEA", "KDEN", "pnw mountain"], ["KDEN", "KATL", "mountain southeast"],
+    ["KATL", "KJFK", "southeast east"], ["KATL", "KMCO", "southeast florida"], ["KATL", "MMUN", "southeast mexico international"],
+    ["KMSP", "KDTW", "midwest"], ["KMSP", "KSEA", "midwest pnw"], ["KDTW", "KLGA", "midwest east"],
+    ["KBOS", "KATL", "east southeast"], ["KMCO", "KATL", "florida southeast"],
+  ]),
+  ...buildManualRoutes("NA", "UAL", [
+    ["KSAN", "KDEN", "socal mountain"], ["KSAN", "KSLC", "socal mountain"], ["KLAX", "KDEN", "west mountain"],
+    ["KLAX", "KSLC", "west mountain"], ["KLAX", "KEWR", "west east"], ["KLAX", "KIAD", "west east"],
+    ["KSFO", "KDEN", "west mountain"], ["KSFO", "KSLC", "west mountain"], ["KSFO", "KJFK", "west east"],
+    ["KSFO", "KBOS", "west east"], ["KDEN", "KCLT", "mountain southeast"], ["KDEN", "CYYZ", "mountain canada international"],
+    ["KDEN", "KORD", "mountain midwest"], ["KIAD", "KBOS", "east"], ["KEWR", "KMCO", "east florida"],
+  ]),
+  ...buildManualRoutes("NA", "JBU", [
+    ["KLAX", "KJFK", "west east"], ["KJFK", "KLAX", "east west"], ["KBOS", "KFLL", "east florida"],
+    ["KJFK", "KFLL", "east florida"], ["KLGA", "KMCO", "east florida"], ["KRDU", "KBOS", "southeast east"],
+  ]),
+  ...buildManualRoutes("NA", "ACA", [
+    ["KSAN", "CYVR", "socal canada international"], ["KLAX", "CYVR", "west canada international"],
+    ["KLAX", "CYYC", "west canada international"], ["KSFO", "CYVR", "west canada international"],
+    ["KSEA", "CYVR", "pnw canada international"], ["KJFK", "CYUL", "east canada international"],
+    ["CYYZ", "KORD", "canada midwest international"], ["CYUL", "KJFK", "canada east international"],
+  ]),
+  ...buildManualRoutes("NA", "AMX", [
+    ["KLAX", "MMUN", "west mexico international"], ["KMIA", "MMUN", "florida mexico international"],
+    ["KLAX", "MMMX", "west mexico international"], ["KLAX", "MMGL", "west mexico international"],
+    ["KSFO", "MMPR", "west mexico international"], ["KLAX", "MMSD", "west mexico international"],
+    ["KSAN", "MMSD", "socal mexico international"], ["MMMX", "KDFW", "mexico texas international"],
+  ]),
+  ...buildManualRoutes("EU", "BAW", [
+    ["EGLL", "EHAM", "uk west-europe"], ["EGLL", "EDDF", "uk central-europe"], ["EGLL", "LFPG", "uk west-europe"],
+    ["EGLL", "LSZH", "uk central-europe"], ["EGLL", "LEMD", "uk southern-europe"], ["EGLL", "LOWW", "uk central-europe"],
+    ["ENGM", "EGLL", "northern-europe uk"], ["LSZH", "EGLL", "central-europe uk"], ["LOWW", "EGLL", "central-europe uk"],
+  ]),
+  ...buildManualRoutes("EU", "KLM", [
+    ["EHAM", "LOWW", "west central-europe"], ["EHAM", "LEMD", "west southern-europe"], ["EHAM", "LIMC", "west southern-europe"],
+    ["LOWW", "EHAM", "central west-europe"], ["LEMD", "EHAM", "southern west-europe"], ["EKCH", "EHAM", "northern west-europe"],
+    ["EPWA", "EHAM", "eastern west-europe"], ["EIDW", "EHAM", "ireland west-europe"], ["EHAM", "LPPT", "west southern-europe"],
+  ]),
+  ...buildManualRoutes("EU", "DLH", [
+    ["EDDF", "LIRF", "central southern-europe"], ["EDDF", "LEBL", "central southern-europe"], ["EDDM", "LGAV", "central southern-europe"],
+    ["ESSA", "EDDF", "northern central-europe"], ["LHBP", "EDDF", "eastern central-europe"], ["EDDF", "EGCC", "central uk"],
+    ["EDDM", "EIDW", "central ireland"], ["EDDH", "LSZH", "central-europe"], ["EDDL", "LEBL", "central southern-europe"],
+  ]),
+  ...buildManualRoutes("EU", "AFR", [
+    ["LFPG", "LOWW", "west central-europe"], ["LFPG", "LIRF", "west southern-europe"], ["LFPG", "EKCH", "west northern-europe"],
+    ["LFPO", "LEBL", "west southern-europe"], ["LFPG", "EPWA", "west eastern-europe"], ["LFPG", "EGKK", "west uk"],
+  ]),
+  ...buildManualRoutes("EU", "IBE", [
+    ["LEMD", "EGLL", "southern uk"], ["LEMD", "EHAM", "southern west-europe"], ["LEMD", "LIRF", "southern-europe"],
+    ["LEBL", "EGKK", "southern uk"], ["LEBL", "EDDF", "southern central-europe"], ["LEMD", "LPPT", "iberia"],
+  ]),
+  ...buildManualRoutes("EU", "VLG", [
+    ["LEBL", "EGKK", "southern uk"], ["LEBL", "LFPG", "southern west-europe"], ["LEBL", "LIMC", "southern-europe"],
+    ["LIRF", "LEBL", "southern-europe"], ["LIMC", "EHAM", "southern west-europe"], ["LIML", "LFPG", "southern west-europe"],
+  ]),
+  ...buildManualRoutes("EU", "SAS", [
+    ["EKCH", "EHAM", "northern west-europe"], ["ESSA", "EDDF", "northern central-europe"], ["ENGM", "EGLL", "northern uk"],
+    ["EFHK", "EDDF", "northern central-europe"], ["EKCH", "LSZH", "northern central-europe"], ["ESSA", "LFPG", "northern west-europe"],
+  ]),
+  ...buildManualRoutes("EU", "WZZ", [
+    ["LROP", "LOWW", "eastern central-europe"], ["LYBE", "EDDF", "southeast central-europe"], ["LDZA", "EDDM", "southeast central-europe"],
+    ["LKPR", "EGSS", "central uk"], ["LHBP", "EGKK", "eastern uk"], ["EPWA", "LIRF", "eastern southern-europe"],
+  ]),
+];
 
 const form = document.getElementById("planner-form");
 const resultsEl = document.getElementById("results");
@@ -172,13 +269,34 @@ function bindEvents() {
       Array.from(regionSelect.options).forEach((option) => {
         option.selected = selections.includes(option.value);
       });
+      updateRegionOptionVisibility();
       persistPreferences();
     });
   });
 
-  ["regions", "daylight-preference", "coverage-priority", "result-count", "home-airport"].forEach((id) => {
+  [
+    "regions",
+    "daylight-preference",
+    "coverage-priority",
+    "result-count",
+    "home-airport",
+    "prefer-socal",
+    "more-variety",
+    "avoid-recent",
+    "include-na-international",
+  ].forEach((id) => {
     document.getElementById(id).addEventListener("change", persistPreferences);
   });
+  document.getElementById("regions").addEventListener("change", updateRegionOptionVisibility);
+  document.getElementById("clear-history-button").addEventListener("click", clearRecentRouteHistory);
+  document.getElementById("surprise-button").addEventListener("click", () => {
+    document.getElementById("more-variety").checked = true;
+    document.getElementById("avoid-recent").checked = true;
+    document.getElementById("include-na-international").checked = true;
+    persistPreferences();
+    form.requestSubmit();
+  });
+  updateRegionOptionVisibility();
 }
 
 function setDefaultDateAndTimes() {
@@ -212,6 +330,10 @@ function hydratePreferences() {
     if (prefs.resultCount) {
       document.getElementById("result-count").value = prefs.resultCount;
     }
+    setCheckedPreference("prefer-socal", prefs.preferSocal, true);
+    setCheckedPreference("more-variety", prefs.moreVariety, false);
+    setCheckedPreference("avoid-recent", prefs.avoidRecent, true);
+    setCheckedPreference("include-na-international", prefs.includeNaInternational, true);
     if (Array.isArray(prefs.regions)) {
       const select = document.getElementById("regions");
       Array.from(select.options).forEach((option) => {
@@ -231,8 +353,24 @@ function persistPreferences() {
     coveragePriority: document.getElementById("coverage-priority").value,
     resultCount: document.getElementById("result-count").value,
     regions: getSelectedValues(regionSelect),
+    preferSocal: document.getElementById("prefer-socal").checked,
+    moreVariety: document.getElementById("more-variety").checked,
+    avoidRecent: document.getElementById("avoid-recent").checked,
+    includeNaInternational: document.getElementById("include-na-international").checked,
   };
   localStorage.setItem("fenixA320PlannerPrefs", JSON.stringify(prefs));
+}
+
+function setCheckedPreference(id, value, fallback) {
+  document.getElementById(id).checked = typeof value === "boolean" ? value : fallback;
+}
+
+function updateRegionOptionVisibility() {
+  const selected = getSelectedValues(document.getElementById("regions"));
+  const naSelected = selected.includes("NA") || selected.includes("MIXED");
+  document.querySelectorAll("[data-na-only]").forEach((node) => {
+    node.hidden = !naSelected;
+  });
 }
 
 async function loadReferenceData() {
@@ -253,7 +391,7 @@ async function loadReferenceData() {
     }
   });
   state.airlines = parseAirlines(airlinesText);
-  state.routes = parseRoutes(routesText).filter((route) => {
+  const publicRoutes = parseRoutes(routesText).filter((route) => {
     if (!state.airportMap.has(route.from) || !state.airportMap.has(route.to)) {
       return false;
     }
@@ -265,6 +403,7 @@ async function loadReferenceData() {
     }
     return route.equipment.some((eq) => AIRBUS_EQUIPMENT_CODES.has(eq) || ["319", "320", "321", "32N", "32A", "32Q", "32S"].includes(eq));
   });
+  state.routes = mergeRoutePools(publicRoutes, MANUAL_ROUTES);
 }
 
 async function refreshNetwork() {
@@ -328,6 +467,10 @@ function collectInput() {
   const daylightPreference = document.getElementById("daylight-preference").value;
   const coveragePriority = document.getElementById("coverage-priority").value;
   const resultCount = Number(document.getElementById("result-count").value);
+  const preferSocal = document.getElementById("prefer-socal").checked;
+  const moreVariety = document.getElementById("more-variety").checked;
+  const avoidRecent = document.getElementById("avoid-recent").checked;
+  const includeNaInternational = document.getElementById("include-na-international").checked;
 
   const depUtc = pacificLocalToUtc(departureDate, departureTime);
   let arrUtc = pacificLocalToUtc(departureDate, arrivalTime);
@@ -347,6 +490,10 @@ function collectInput() {
     daylightPreference,
     coveragePriority,
     resultCount,
+    preferSocal,
+    moreVariety,
+    avoidRecent,
+    includeNaInternational,
   };
 }
 
@@ -369,7 +516,20 @@ function updateTimeSummary(input = null) {
 
 function rankRoutes(input) {
   const viableRegions = new Set(input.regions.includes("MIXED") ? ["NA", "EU"] : input.regions);
+  const recentRoutes = loadRecentRoutes(getRecentRegionKey(input));
+  let candidates = buildRouteCandidates(input, viableRegions, recentRoutes, 40);
+  if (candidates.length < input.resultCount * 3) {
+    candidates = buildRouteCandidates(input, viableRegions, recentRoutes, 70);
+  }
+
+  const selected = selectDiverseRoutes(candidates, input);
+  saveRecentRoutes(getRecentRegionKey(input), selected);
+  return selected;
+}
+
+function buildRouteCandidates(input, viableRegions, recentRoutes, blockWindowMinutes) {
   const candidates = [];
+  const recentKeys = new Set(recentRoutes.map((item) => item.key));
 
   for (const route of state.routes) {
     const from = state.airportMap.get(route.from);
@@ -381,13 +541,16 @@ function rankRoutes(input) {
     if (!viableRegions.has(from.region) || !viableRegions.has(to.region)) {
       continue;
     }
+    if (!input.includeNaInternational && from.region === "NA" && to.region === "NA" && from.country !== to.country) {
+      continue;
+    }
 
     const airline = resolveAirline(route);
 
     const distanceNm = greatCircleNm(from.lat, from.lon, to.lat, to.lon);
     const estimatedBlockMinutes = estimateBlockMinutes(distanceNm);
     const blockDelta = Math.abs(estimatedBlockMinutes - input.blockMinutes);
-    if (blockDelta > 35) {
+    if (blockDelta > blockWindowMinutes) {
       continue;
     }
 
@@ -407,31 +570,77 @@ function rankRoutes(input) {
 
     const daylightScore = computeDaylightScore(input.daylightPreference, input.depUtc, arrEstimateUtc, from.tz, to.tz);
     const coverage = scoreCoverage(route.from, route.to);
-    const realismBias = realismScore(input.homeAirport, route, airline.icao);
-    const coverageWeight = input.coveragePriority === "high" ? 1.5 : input.coveragePriority === "balanced" ? 1.2 : 0.9;
+    const traits = getRouteTraits(route, from, to);
+    const routeKey = getRouteKey(route);
+    const isRecent = recentKeys.has(routeKey);
+    const realismBias = realismScore(input, route, airline.icao, traits);
+    const coverageWeight = input.coveragePriority === "high" ? 1.15 : input.coveragePriority === "balanced" ? 1 : 0.75;
+    const recentPenalty = input.avoidRecent && isRecent ? (input.moreVariety ? 50 : 32) : 0;
+    const curatedBonus = route.source === "manual" ? 14 : 0;
+    const randomness = (input.moreVariety ? 16 : 8) * Math.random();
 
-    const score = (120 - blockDelta * 2.1) + (coverage.score * coverageWeight) + daylightScore + realismBias;
+    const score = (130 - blockDelta * 2.4) + (Math.min(coverage.score, 55) * coverageWeight) + daylightScore + realismBias + curatedBonus + randomness - recentPenalty;
     candidates.push({
       route,
       from,
       to,
       airline,
+      routeKey,
       distanceNm,
       estimatedBlockMinutes,
+      blockDelta,
       depLocal,
       arrLocal,
       coverage,
+      traits,
+      isRecent,
       score,
       arrEstimateUtc,
       flightNumber: suggestFlightNumber(airline, route.from, route.to),
       gateInfo: buildGateInfo(route.from, route.to, airline.icao),
-      whyFit: buildWhyFit(route, airline, estimatedBlockMinutes, coverage, blockDelta, daylightScore),
+      whyFit: "",
     });
   }
 
-  return candidates
-    .sort((a, b) => b.score - a.score)
-    .slice(0, input.resultCount);
+  return candidates.sort((a, b) => b.score - a.score);
+}
+
+function selectDiverseRoutes(candidates, input) {
+  const selected = [];
+  const depCounts = new Map();
+  const arrCounts = new Map();
+  const corridorCounts = new Map();
+  const pool = candidates.slice(0, Math.max(80, input.resultCount * 18));
+  const varietyWeight = input.moreVariety ? 24 : 14;
+
+  while (selected.length < input.resultCount && pool.length) {
+    let bestIndex = 0;
+    let bestScore = -Infinity;
+
+    pool.forEach((candidate, index) => {
+      const depCount = depCounts.get(candidate.route.from) ?? 0;
+      const arrCount = arrCounts.get(candidate.route.to) ?? 0;
+      const corridorCount = corridorCounts.get(candidate.traits.corridor) ?? 0;
+      const diversityAdjustment =
+        (depCount === 0 ? varietyWeight : -22 * depCount)
+        + (arrCount === 0 ? varietyWeight : -22 * arrCount)
+        + (corridorCount === 0 ? varietyWeight / 2 : -10 * corridorCount);
+      const score = candidate.score + diversityAdjustment;
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = index;
+      }
+    });
+
+    const [picked] = pool.splice(bestIndex, 1);
+    picked.whyFit = buildWhyFit(picked, input, selected);
+    selected.push(picked);
+    depCounts.set(picked.route.from, (depCounts.get(picked.route.from) ?? 0) + 1);
+    arrCounts.set(picked.route.to, (arrCounts.get(picked.route.to) ?? 0) + 1);
+    corridorCounts.set(picked.traits.corridor, (corridorCounts.get(picked.traits.corridor) ?? 0) + 1);
+  }
+
+  return selected;
 }
 
 function renderResults(routes, input) {
@@ -566,10 +775,16 @@ function computeDaylightScore(preference, depUtc, arrUtc, depTz, arrTz) {
   return preference === "prefer-daylight" ? -20 : -8;
 }
 
-function realismScore(homeAirport, route, airlineCode) {
+function realismScore(input, route, airlineCode, traits) {
   let score = 0;
-  if (route.from === homeAirport || route.to === homeAirport) {
-    score += 18;
+  if (route.from === input.homeAirport || route.to === input.homeAirport) {
+    score += input.preferSocal && route.from.startsWith("K") ? 14 : 18;
+  }
+  if (input.preferSocal && traits.isSocal && traits.region === "NA") {
+    score += 12;
+  }
+  if (traits.isReturnToSocal && traits.region === "NA") {
+    score += 8;
   }
   if (PREFERRED_A320_AIRLINES.has(airlineCode)) {
     score += 10;
@@ -577,7 +792,8 @@ function realismScore(homeAirport, route, airlineCode) {
   return score;
 }
 
-function buildWhyFit(route, airline, estimatedBlockMinutes, coverage, blockDelta, daylightScore) {
+function buildWhyFit(candidate, input, alreadySelected) {
+  const { route, airline, estimatedBlockMinutes, coverage, blockDelta, daylightScore, traits } = candidate;
   const airlineDisplayName = getAirlineDisplayName(airline);
   const pieces = [
     `${airlineDisplayName} is a believable A320-family operator for this city pair.`,
@@ -591,7 +807,110 @@ function buildWhyFit(route, airline, estimatedBlockMinutes, coverage, blockDelta
     pieces.push("This one is workable, but the timing skews darker than your stated preference.");
   }
 
+  const reasons = [];
+  if (blockDelta <= 12) {
+    reasons.push("Good block time match");
+  }
+  if (coverage.depPositions.codes.length) {
+    reasons.push("Departure ATC online");
+  }
+  if (coverage.arrPositions.codes.length) {
+    reasons.push("Arrival ATC online");
+  }
+  if ((coverage.chips[2]?.tone ?? "") !== "low") {
+    reasons.push("Enroute/center ATC online");
+  }
+  if (traits.isSocal && traits.region === "NA") {
+    reasons.push("SoCal-focused route");
+  }
+  if (traits.isReturnToSocal) {
+    reasons.push("Return-to-SoCal route");
+  }
+  if (traits.isInternational) {
+    reasons.push("International route");
+  }
+  if (!candidate.isRecent) {
+    reasons.push("Not recently suggested");
+  }
+  if (!alreadySelected.some((picked) => picked.route.from === route.from || picked.route.to === route.to)) {
+    reasons.push(traits.region === "EU" ? "Europe variety pick" : "North America variety pick");
+  }
+
+  pieces.push(`Selected because: ${reasons.slice(0, 5).join(", ")}.`);
   return pieces.join(" ");
+}
+
+function getRouteTraits(route, from, to) {
+  const metadata = route.tags ?? [];
+  const isSocal = SOCAL_AIRPORTS.has(route.from) || SOCAL_AIRPORTS.has(route.to);
+  const isReturnToSocal = SOCAL_AIRPORTS.has(route.to) && !SOCAL_AIRPORTS.has(route.from);
+  const isInternational = from.country !== to.country;
+  const corridor = metadata.find((tag) => !["socal", "international", "return-socal"].includes(tag))
+    ?? `${from.country}-${to.country}`;
+
+  return {
+    region: route.regionHint || from.region,
+    isSocal,
+    isReturnToSocal,
+    isInternational,
+    corridor,
+  };
+}
+
+function getRouteKey(route) {
+  return `${route.from}-${route.to}`;
+}
+
+function getRecentRegionKey(input) {
+  const regions = input.regions.includes("MIXED") ? ["NA", "EU"] : input.regions;
+  if (regions.length === 1) {
+    return regions[0];
+  }
+  return "MIXED";
+}
+
+function loadRecentRouteStore() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(RECENT_ROUTES_STORAGE_KEY) || "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function loadRecentRoutes(regionKey) {
+  const store = loadRecentRouteStore();
+  return Array.isArray(store[regionKey]) ? store[regionKey] : [];
+}
+
+function saveRecentRoutes(regionKey, routes) {
+  if (!routes.length) {
+    return;
+  }
+  const store = loadRecentRouteStore();
+  const current = Array.isArray(store[regionKey]) ? store[regionKey] : [];
+  const incoming = routes.map((candidate) => ({
+    key: candidate.routeKey,
+    from: candidate.route.from,
+    to: candidate.route.to,
+    at: new Date().toISOString(),
+  }));
+  const seen = new Set();
+  store[regionKey] = [...incoming, ...current]
+    .filter((item) => {
+      if (!item?.key || seen.has(item.key)) {
+        return false;
+      }
+      seen.add(item.key);
+      return true;
+    })
+    .slice(0, RECENT_ROUTES_LIMIT);
+  localStorage.setItem(RECENT_ROUTES_STORAGE_KEY, JSON.stringify(store));
+}
+
+function clearRecentRouteHistory() {
+  localStorage.removeItem(RECENT_ROUTES_STORAGE_KEY);
+  resultMetaEl.textContent = "Recent route history cleared";
 }
 
 function buildSimbriefBlock(candidate, input) {
@@ -856,6 +1175,39 @@ function parseRoutes(text) {
   })).filter((route) => route.from && route.to && (route.airlineCode || route.airlineId));
 }
 
+function buildManualRoutes(regionHint, airlineCode, routes) {
+  return routes.map(([from, to, tagText]) => ({
+    airlineCode,
+    airlineId: "",
+    from,
+    to,
+    stops: 0,
+    equipment: ["320"],
+    source: "manual",
+    regionHint,
+    tags: String(tagText || "").split(/\s+/).filter(Boolean),
+  }));
+}
+
+function mergeRoutePools(publicRoutes, manualRoutes) {
+  const merged = [];
+  const seen = new Set();
+
+  [...manualRoutes, ...publicRoutes].forEach((route) => {
+    if (!state.airportMap.has(route.from) || !state.airportMap.has(route.to)) {
+      return;
+    }
+    const key = `${route.from}-${route.to}-${route.airlineCode || route.airlineId || "UNK"}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    merged.push(route);
+  });
+
+  return merged;
+}
+
 function resolveAirline(route) {
   const byId = state.airlines.byId;
   const byAnyCode = state.airlines.byAnyCode;
@@ -1046,7 +1398,7 @@ function normalizeAirportCode(code) {
 }
 
 function inferRegion(country, tz) {
-  if (tz.startsWith("Europe/") || ["Ireland", "United Kingdom", "Spain", "France", "Germany", "Netherlands", "Portugal", "Denmark", "Sweden", "Norway", "Italy", "Belgium", "Switzerland", "Austria"].includes(country)) {
+  if (tz.startsWith("Europe/") || ["Ireland", "United Kingdom", "Spain", "France", "Germany", "Netherlands", "Portugal", "Denmark", "Sweden", "Norway", "Italy", "Belgium", "Switzerland", "Austria", "Poland", "Hungary", "Romania", "Serbia", "Croatia", "Czech Republic", "Finland", "Greece"].includes(country)) {
     return "EU";
   }
   if (tz.startsWith("America/") || ["United States", "Canada", "Mexico"].includes(country)) {
