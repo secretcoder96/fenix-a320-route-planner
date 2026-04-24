@@ -88,6 +88,10 @@ const PREFERRED_A320_AIRLINES = new Set([
   "AAL", "DAL", "UAL", "ASA", "JBU", "ACA", "WJA", "BAW", "EZY", "IBE", "VLG", "AFR", "KLM", "DLH", "EIN", "TAP", "SAS", "CFG", "BTI", "SWR",
 ]);
 
+const FAVORITES_STORAGE_KEY = "fenixA320PlannerFavorites";
+const FAVORITES_STORAGE_VERSION_KEY = "fenixA320PlannerFavoritesVersion";
+const FAVORITES_STORAGE_VERSION = "2";
+
 const form = document.getElementById("planner-form");
 const resultsEl = document.getElementById("results");
 const favoritesEl = document.getElementById("favorites");
@@ -624,19 +628,35 @@ function toggleFavorite(candidate, input) {
     });
   }
 
-  localStorage.setItem("fenixA320PlannerFavorites", JSON.stringify(favorites.slice(0, 12)));
+  localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(favorites.slice(0, 12)));
+  localStorage.setItem(FAVORITES_STORAGE_VERSION_KEY, FAVORITES_STORAGE_VERSION);
 }
 
 function loadFavorites() {
-  const raw = localStorage.getItem("fenixA320PlannerFavorites");
+  const raw = localStorage.getItem(FAVORITES_STORAGE_KEY);
   if (!raw) {
     return [];
   }
 
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) {
+      localStorage.removeItem(FAVORITES_STORAGE_KEY);
+      return [];
+    }
+
+    const sanitized = parsed.filter((favorite) => !isStaleFavorite(favorite)).slice(0, 12);
+    const needsRewrite = sanitized.length !== parsed.length
+      || localStorage.getItem(FAVORITES_STORAGE_VERSION_KEY) !== FAVORITES_STORAGE_VERSION;
+
+    if (needsRewrite) {
+      localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(sanitized));
+      localStorage.setItem(FAVORITES_STORAGE_VERSION_KEY, FAVORITES_STORAGE_VERSION);
+    }
+
+    return sanitized;
   } catch {
+    localStorage.removeItem(FAVORITES_STORAGE_KEY);
     return [];
   }
 }
@@ -678,7 +698,8 @@ function renderFavorites() {
 
     card.querySelector(".remove-favorite").addEventListener("click", () => {
       const filtered = loadFavorites().filter((item) => item.key !== favorite.key);
-      localStorage.setItem("fenixA320PlannerFavorites", JSON.stringify(filtered));
+      localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(filtered));
+      localStorage.setItem(FAVORITES_STORAGE_VERSION_KEY, FAVORITES_STORAGE_VERSION);
       renderFavorites();
     });
 
@@ -741,7 +762,11 @@ function suggestFlightNumber(airline, from, to) {
     .map((char) => char.charCodeAt(0))
     .reduce((sum, code) => sum + code, 0);
   const number = 100 + (numericSeed % 8900);
-  const operatorCode = airline.icao || airline.iata || airline.routeCode || "A320";
+  const operatorCode = isValidIcaoAirlineCode(airline.icao)
+    ? airline.icao
+    : isValidIataAirlineCode(airline.iata)
+      ? airline.iata
+      : "A32";
   return `${operatorCode}${number}`;
 }
 
@@ -808,23 +833,96 @@ function resolveAirline(route) {
     || (route.airlineCode ? byAnyCode.get(route.airlineCode) : null);
 
   if (found) {
+    const resolvedIcao = isValidIcaoAirlineCode(found.icao)
+      ? found.icao
+      : isValidIcaoAirlineCode(route.airlineCode)
+        ? route.airlineCode
+        : "";
+
+    if (resolvedIcao) {
+      return {
+        ...found,
+        routeCode: route.airlineCode || "",
+        icao: resolvedIcao,
+        iata: isValidIataAirlineCode(found.iata) ? found.iata : "",
+        name: found.name || resolvedIcao,
+      };
+    }
+  }
+
+  const suggested = suggestFallbackAirline(route);
+  if (suggested) {
     return {
-      ...found,
-      routeCode: route.airlineCode || "",
-      icao: found.icao || found.iata || route.airlineCode || route.airlineId || "UNK",
-      iata: found.iata || "",
-      name: found.name || found.icao || route.airlineCode || "Unknown operator"
+      ...suggested,
+      routeCode: route.airlineCode || suggested.routeCode || "",
     };
   }
 
-  const fallbackCode = route.airlineCode || route.airlineId || "UNK";
+  const fallbackCode = isValidIcaoAirlineCode(route.airlineCode) ? route.airlineCode : "UNK";
   return {
     id: route.airlineId || "",
     iata: "",
     icao: fallbackCode,
     routeCode: fallbackCode,
-    name: `Unknown operator (${fallbackCode})`
+    name: fallbackCode === "UNK" ? "Suggested A320 operator unavailable" : `Unknown operator (${fallbackCode})`,
   };
+}
+
+function suggestFallbackAirline(route) {
+  const depCodes = Object.keys(TERMINAL_GATE_DATABASE[route.from] ?? {});
+  const arrCodes = Object.keys(TERMINAL_GATE_DATABASE[route.to] ?? {});
+  const sharedPreferred = depCodes.filter((code) => arrCodes.includes(code) && PREFERRED_A320_AIRLINES.has(code));
+  const localPreferred = [...new Set([...depCodes, ...arrCodes])].filter((code) => PREFERRED_A320_AIRLINES.has(code));
+  const selectedCode = sharedPreferred[0] || localPreferred[0] || "";
+
+  if (!selectedCode) {
+    return null;
+  }
+
+  const knownAirline = state.airlines.byIcao.get(selectedCode) || state.airlines.byIata.get(selectedCode);
+  return {
+    id: knownAirline?.id || "",
+    iata: isValidIataAirlineCode(knownAirline?.iata || "") ? knownAirline.iata : "",
+    icao: selectedCode,
+    routeCode: selectedCode,
+    name: knownAirline?.name || `Suggested operator ${selectedCode}`,
+  };
+}
+
+function isValidIcaoAirlineCode(code) {
+  return /^[A-Z]{3}$/.test((code || "").toUpperCase());
+}
+
+function isValidIataAirlineCode(code) {
+  return /^[A-Z0-9]{2}$/.test((code || "").toUpperCase()) && !/^\d+$/.test((code || "").toUpperCase());
+}
+
+function isStaleFavorite(favorite) {
+  if (!favorite || typeof favorite !== "object") {
+    return true;
+  }
+
+  const airlineCode = String(favorite.airlineCode || "").trim().toUpperCase();
+  const airlineName = String(favorite.airlineName || "").trim();
+  const flightNumber = String(favorite.flightNumber || "").trim().toUpperCase();
+
+  if (!favorite.key || !favorite.route) {
+    return true;
+  }
+
+  if (!airlineCode || /^\d+$/.test(airlineCode)) {
+    return true;
+  }
+
+  if (airlineName && airlineName === airlineCode) {
+    return true;
+  }
+
+  if (/^\d+$/.test(airlineCode) && flightNumber.startsWith(airlineCode)) {
+    return true;
+  }
+
+  return false;
 }
 
 function parseCsvRows(text) {
