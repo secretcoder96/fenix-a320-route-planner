@@ -88,6 +88,32 @@ const PREFERRED_A320_AIRLINES = new Set([
   "AAL", "DAL", "UAL", "ASA", "JBU", "ACA", "WJA", "BAW", "EZY", "IBE", "VLG", "AFR", "KLM", "DLH", "EIN", "TAP", "SAS", "CFG", "BTI", "SWR",
 ]);
 
+const MANUAL_AIRLINE_NAMES = {
+  AAL: "American Airlines",
+  ACA: "Air Canada",
+  AFR: "Air France",
+  ASA: "Alaska Airlines",
+  BAW: "British Airways",
+  BTI: "airBaltic",
+  CFG: "Condor",
+  DAL: "Delta Air Lines",
+  DLH: "Lufthansa",
+  EIN: "Aer Lingus",
+  EZY: "easyJet",
+  IBE: "Iberia",
+  JBU: "JetBlue",
+  KLM: "KLM Royal Dutch Airlines",
+  SAS: "Scandinavian Airlines",
+  SWA: "Southwest Airlines",
+  SWR: "Swiss International Air Lines",
+  TAP: "TAP Air Portugal",
+  TRA: "Transavia",
+  UAL: "United Airlines",
+  VLG: "Vueling",
+  WJA: "WestJet",
+  RYR: "Ryanair",
+};
+
 const FAVORITES_STORAGE_KEY = "fenixA320PlannerFavorites";
 const FAVORITES_STORAGE_VERSION_KEY = "fenixA320PlannerFavoritesVersion";
 const FAVORITES_STORAGE_VERSION = "2";
@@ -427,15 +453,16 @@ function renderResults(routes, input) {
   resultsEl.innerHTML = "";
 
   for (const candidate of routes) {
+    const airlineDisplayName = getAirlineDisplayName(candidate.airline);
     const fragment = template.content.cloneNode(true);
-    fragment.querySelector(".eyebrow").textContent = `${candidate.airline.icao} • ${candidate.airline.name}`;
+    fragment.querySelector(".eyebrow").textContent = `${candidate.airline.icao} • ${airlineDisplayName}`;
     fragment.querySelector(".route-title").textContent = `${candidate.route.from} → ${candidate.route.to}`;
     fragment.querySelector(".score-badge").textContent = candidate.coverage.label;
 
     const details = [
       ["Estimated block", formatMinutes(candidate.estimatedBlockMinutes)],
       ["Airline ICAO", candidate.airline.icao],
-      ["Airline name", candidate.airline.name],
+      ["Airline name", airlineDisplayName],
       ["Suggested flight number", candidate.flightNumber],
       ["SimBrief origin / destination", `${candidate.route.from} / ${candidate.route.to}`],
       ["Departure local", `${candidate.route.from} ${candidate.depLocal}`],
@@ -551,8 +578,9 @@ function realismScore(homeAirport, route, airlineCode) {
 }
 
 function buildWhyFit(route, airline, estimatedBlockMinutes, coverage, blockDelta, daylightScore) {
+  const airlineDisplayName = getAirlineDisplayName(airline);
   const pieces = [
-    `${airline.name} is a believable A320-family operator for this city pair.`,
+    `${airlineDisplayName} is a believable A320-family operator for this city pair.`,
     `The estimated block of ${formatMinutes(estimatedBlockMinutes)} is within ${blockDelta} minutes of your requested gate-to-gate window.`,
     coverage.description,
   ];
@@ -567,9 +595,10 @@ function buildWhyFit(route, airline, estimatedBlockMinutes, coverage, blockDelta
 }
 
 function buildSimbriefBlock(candidate, input) {
+  const airlineDisplayName = getAirlineDisplayName(candidate.airline);
   return [
     `Airline ICAO: ${candidate.airline.icao}`,
-    `Airline Name: ${candidate.airline.name}`,
+    `Airline Name: ${airlineDisplayName}`,
     `Flight Number: ${candidate.flightNumber.replace(candidate.airline.icao, "")}`,
     `Callsign / Flight: ${candidate.flightNumber}`,
     `Aircraft: Fenix A320`,
@@ -609,6 +638,7 @@ function buildSimbriefDispatchUrl(candidate, input) {
 function toggleFavorite(candidate, input) {
   const favorites = loadFavorites();
   const key = `${candidate.route.from}-${candidate.route.to}-${candidate.airline.icao}`;
+  const airlineDisplayName = getAirlineDisplayName(candidate.airline);
   const existingIndex = favorites.findIndex((item) => item.key === key);
 
   if (existingIndex >= 0) {
@@ -618,7 +648,7 @@ function toggleFavorite(candidate, input) {
       key,
       route: `${candidate.route.from} → ${candidate.route.to}`,
       airlineCode: candidate.airline.icao,
-      airlineName: candidate.airline.name,
+      airlineName: airlineDisplayName,
       flightNumber: candidate.flightNumber,
       block: formatMinutes(candidate.estimatedBlockMinutes),
       gateInfo: candidate.gateInfo,
@@ -681,11 +711,12 @@ function renderFavorites() {
 
   favoritesEl.innerHTML = "";
   favorites.forEach((favorite) => {
+    const airlineDisplayName = lookupAirlineName(favorite.airlineCode) || favorite.airlineName || `Operator ${favorite.airlineCode}`;
     const card = document.createElement("article");
     card.className = "favorite-card";
     card.innerHTML = `
       <h3>${favorite.route}</h3>
-      <p><strong>${favorite.airlineCode}</strong> • ${favorite.airlineName} • ${favorite.flightNumber}</p>
+      <p><strong>${favorite.airlineCode}</strong> • ${airlineDisplayName} • ${favorite.flightNumber}</p>
       <p><strong>Estimated block:</strong> ${favorite.block}</p>
       <p><strong>Terminal / gate:</strong> ${favorite.gateInfo}</p>
       <div class="card-actions">
@@ -865,7 +896,7 @@ function resolveAirline(route) {
     iata: "",
     icao: fallbackCode,
     routeCode: fallbackCode,
-    name: fallbackCode === "UNK" ? "Suggested A320 operator unavailable" : `Unknown operator (${fallbackCode})`,
+    name: lookupAirlineName(fallbackCode) || (fallbackCode === "UNK" ? "Suggested A320 operator" : `Operator ${fallbackCode}`),
   };
 }
 
@@ -900,7 +931,18 @@ function lookupAirlineName(code, fallbackAirline = null) {
     || state.airlines.byAnyCode.get(normalizedCode)
     || fallbackAirline;
 
-  return directMatch?.name || "";
+  return directMatch?.name || MANUAL_AIRLINE_NAMES[normalizedCode] || "";
+}
+
+function getAirlineDisplayName(airline) {
+  if (!airline) {
+    return "Operator unavailable";
+  }
+
+  return lookupAirlineName(airline.icao, airline)
+    || lookupAirlineName(airline.routeCode, airline)
+    || airline.name
+    || `Operator ${airline.icao || airline.routeCode || "UNK"}`;
 }
 
 function isValidIcaoAirlineCode(code) {
@@ -929,6 +971,10 @@ function isStaleFavorite(favorite) {
   }
 
   if (airlineName && airlineName === airlineCode) {
+    return true;
+  }
+
+  if (/suggested a320 operator unavailable/i.test(airlineName)) {
     return true;
   }
 
