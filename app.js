@@ -5,6 +5,7 @@ const STORAGE_KEYS = {
   mode: "a320VirtualPm.mode",
   voiceEnabled: "a320VirtualPm.voiceEnabled",
   autoSubmitVoice: "a320VirtualPm.autoSubmitVoice",
+  autoSubmitConfigured: "a320VirtualPm.autoSubmitConfigured",
   progress: "a320VirtualPm.progress",
   log: "a320VirtualPm.log",
   voiceUri: "a320VirtualPm.voiceUri",
@@ -20,7 +21,7 @@ const state = {
   selectedPhaseId: localStorage.getItem(STORAGE_KEYS.phaseId) || "before-start",
   mode: localStorage.getItem(STORAGE_KEYS.mode) || "normal",
   voiceEnabled: localStorage.getItem(STORAGE_KEYS.voiceEnabled) !== "false",
-  autoSubmitVoice: localStorage.getItem(STORAGE_KEYS.autoSubmitVoice) !== "false",
+  autoSubmitVoice: loadAutoSubmitVoicePreference(),
   selectedVoiceUri: localStorage.getItem(STORAGE_KEYS.voiceUri) || "",
   speechRate: DEFAULT_SPEECH_RATE,
   isListening: false,
@@ -78,11 +79,23 @@ function loadLog() {
   }
 }
 
+function loadAutoSubmitVoicePreference() {
+  const configured = localStorage.getItem(STORAGE_KEYS.autoSubmitConfigured);
+  if (configured !== "true") {
+    localStorage.setItem(STORAGE_KEYS.autoSubmitConfigured, "true");
+    localStorage.setItem(STORAGE_KEYS.autoSubmitVoice, "true");
+    return true;
+  }
+
+  return localStorage.getItem(STORAGE_KEYS.autoSubmitVoice) !== "false";
+}
+
 function persistPreferences() {
   localStorage.setItem(STORAGE_KEYS.phaseId, state.selectedPhaseId);
   localStorage.setItem(STORAGE_KEYS.mode, state.mode);
   localStorage.setItem(STORAGE_KEYS.voiceEnabled, String(state.voiceEnabled));
   localStorage.setItem(STORAGE_KEYS.autoSubmitVoice, String(state.autoSubmitVoice));
+  localStorage.setItem(STORAGE_KEYS.autoSubmitConfigured, "true");
   localStorage.setItem(STORAGE_KEYS.voiceUri, state.selectedVoiceUri);
   localStorage.setItem(STORAGE_KEYS.speechRate, String(state.speechRate));
 }
