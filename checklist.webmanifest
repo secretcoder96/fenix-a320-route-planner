@@ -1,0 +1,9 @@
+{
+  "name": "A320 SOP Checklist",
+  "short_name": "A320 SOP",
+  "start_url": "./checklist.html",
+  "display": "standalone",
+  "background_color": "#09131d",
+  "theme_color": "#09131d",
+  "description": "Standalone simulator-focused A320 SOP checklist with PF and PM flows, checkbox tracking, and phase progress."
+}
