@@ -840,12 +840,13 @@ function resolveAirline(route) {
         : "";
 
     if (resolvedIcao) {
+      const resolvedName = lookupAirlineName(resolvedIcao, found);
       return {
         ...found,
         routeCode: route.airlineCode || "",
         icao: resolvedIcao,
         iata: isValidIataAirlineCode(found.iata) ? found.iata : "",
-        name: found.name || resolvedIcao,
+        name: resolvedName || resolvedIcao,
       };
     }
   }
@@ -885,8 +886,21 @@ function suggestFallbackAirline(route) {
     iata: isValidIataAirlineCode(knownAirline?.iata || "") ? knownAirline.iata : "",
     icao: selectedCode,
     routeCode: selectedCode,
-    name: knownAirline?.name || `Suggested operator ${selectedCode}`,
+    name: lookupAirlineName(selectedCode, knownAirline) || `Suggested operator ${selectedCode}`,
   };
+}
+
+function lookupAirlineName(code, fallbackAirline = null) {
+  const normalizedCode = String(code || "").trim().toUpperCase();
+  if (!normalizedCode) {
+    return "";
+  }
+
+  const directMatch = state.airlines.byIcao.get(normalizedCode)
+    || state.airlines.byAnyCode.get(normalizedCode)
+    || fallbackAirline;
+
+  return directMatch?.name || "";
 }
 
 function isValidIcaoAirlineCode(code) {
