@@ -103,7 +103,12 @@ const state = {
   airports: [],
   airportMap: new Map(),
   airportCodeMap: new Map(),
-  airlines: new Map(),
+  airlines: {
+    byId: new Map(),
+    byIata: new Map(),
+    byIcao: new Map(),
+    byAnyCode: new Map(),
+  },
   routes: [],
   network: null,
   lastSnapshot: null,
@@ -347,10 +352,7 @@ function rankRoutes(input) {
       continue;
     }
 
-    const airline = state.airlines.get(route.airlineCode) ?? {
-      code: route.airlineCode,
-      name: route.airlineCode,
-    };
+    const airline = resolveAirline(route);
 
     const distanceNm = greatCircleNm(from.lat, from.lon, to.lat, to.lon);
     const estimatedBlockMinutes = estimateBlockMinutes(distanceNm);
@@ -375,7 +377,7 @@ function rankRoutes(input) {
 
     const daylightScore = computeDaylightScore(input.daylightPreference, input.depUtc, arrEstimateUtc, from.tz, to.tz);
     const coverage = scoreCoverage(route.from, route.to);
-    const realismBias = realismScore(input.homeAirport, route, airline.code);
+    const realismBias = realismScore(input.homeAirport, route, airline.icao);
     const coverageWeight = input.coveragePriority === "high" ? 1.5 : input.coveragePriority === "balanced" ? 1.2 : 0.9;
 
     const score = (120 - blockDelta * 2.1) + (coverage.score * coverageWeight) + daylightScore + realismBias;
@@ -391,8 +393,8 @@ function rankRoutes(input) {
       coverage,
       score,
       arrEstimateUtc,
-      flightNumber: suggestFlightNumber(airline.code, route.from, route.to),
-      gateInfo: buildGateInfo(route.from, route.to, airline.code),
+      flightNumber: suggestFlightNumber(airline, route.from, route.to),
+      gateInfo: buildGateInfo(route.from, route.to, airline.icao),
       whyFit: buildWhyFit(route, airline, estimatedBlockMinutes, coverage, blockDelta, daylightScore),
     });
   }
@@ -422,13 +424,13 @@ function renderResults(routes, input) {
 
   for (const candidate of routes) {
     const fragment = template.content.cloneNode(true);
-    fragment.querySelector(".eyebrow").textContent = `${candidate.airline.code} • ${candidate.airline.name}`;
+    fragment.querySelector(".eyebrow").textContent = `${candidate.airline.icao} • ${candidate.airline.name}`;
     fragment.querySelector(".route-title").textContent = `${candidate.route.from} → ${candidate.route.to}`;
     fragment.querySelector(".score-badge").textContent = candidate.coverage.label;
 
     const details = [
       ["Estimated block", formatMinutes(candidate.estimatedBlockMinutes)],
-      ["Airline ICAO", candidate.airline.code],
+      ["Airline ICAO", candidate.airline.icao],
       ["Airline name", candidate.airline.name],
       ["Suggested flight number", candidate.flightNumber],
       ["SimBrief origin / destination", `${candidate.route.from} / ${candidate.route.to}`],
@@ -463,7 +465,7 @@ function renderResults(routes, input) {
     fragment.querySelector(".simbrief-link").href = buildSimbriefDispatchUrl(candidate, input);
 
     const saveButton = fragment.querySelector(".save-route-button");
-    const favoriteKey = `${candidate.route.from}-${candidate.route.to}-${candidate.airline.code}`;
+    const favoriteKey = `${candidate.route.from}-${candidate.route.to}-${candidate.airline.icao}`;
     if (isFavorite(favoriteKey)) {
       saveButton.textContent = "Saved";
     }
@@ -562,9 +564,9 @@ function buildWhyFit(route, airline, estimatedBlockMinutes, coverage, blockDelta
 
 function buildSimbriefBlock(candidate, input) {
   return [
-    `Airline ICAO: ${candidate.airline.code}`,
+    `Airline ICAO: ${candidate.airline.icao}`,
     `Airline Name: ${candidate.airline.name}`,
-    `Flight Number: ${candidate.flightNumber.replace(candidate.airline.code, "")}`,
+    `Flight Number: ${candidate.flightNumber.replace(candidate.airline.icao, "")}`,
     `Callsign / Flight: ${candidate.flightNumber}`,
     `Aircraft: Fenix A320`,
     `Origin ICAO: ${candidate.route.from}`,
@@ -584,9 +586,9 @@ function buildSimbriefDispatchUrl(candidate, input) {
   const url = new URL("https://dispatch.simbrief.com/options/custom");
   const departureHour = String(input.depUtc.getUTCHours()).padStart(2, "0");
   const departureMinute = String(input.depUtc.getUTCMinutes()).padStart(2, "0");
-  const flightNumberOnly = candidate.flightNumber.replace(candidate.airline.code, "");
+  const flightNumberOnly = candidate.flightNumber.replace(candidate.airline.icao, "");
 
-  url.searchParams.set("airline", candidate.airline.code);
+  url.searchParams.set("airline", candidate.airline.icao);
   url.searchParams.set("fltnum", flightNumberOnly);
   url.searchParams.set("type", "A320");
   url.searchParams.set("orig", candidate.route.from);
@@ -602,7 +604,7 @@ function buildSimbriefDispatchUrl(candidate, input) {
 
 function toggleFavorite(candidate, input) {
   const favorites = loadFavorites();
-  const key = `${candidate.route.from}-${candidate.route.to}-${candidate.airline.code}`;
+  const key = `${candidate.route.from}-${candidate.route.to}-${candidate.airline.icao}`;
   const existingIndex = favorites.findIndex((item) => item.key === key);
 
   if (existingIndex >= 0) {
@@ -611,7 +613,7 @@ function toggleFavorite(candidate, input) {
     favorites.unshift({
       key,
       route: `${candidate.route.from} → ${candidate.route.to}`,
-      airlineCode: candidate.airline.code,
+      airlineCode: candidate.airline.icao,
       airlineName: candidate.airline.name,
       flightNumber: candidate.flightNumber,
       block: formatMinutes(candidate.estimatedBlockMinutes),
@@ -734,12 +736,13 @@ function buildGateInfo(depIcao, arrIcao, airlineCode) {
   return `Dep: ${depHint} Arr: ${arrHint}`;
 }
 
-function suggestFlightNumber(airlineCode, from, to) {
+function suggestFlightNumber(airline, from, to) {
   const numericSeed = Array.from(`${from}${to}`)
     .map((char) => char.charCodeAt(0))
     .reduce((sum, code) => sum + code, 0);
-  const number = 100 + (numericSeed % 1800);
-  return `${airlineCode}${number}`;
+  const number = 100 + (numericSeed % 8900);
+  const operatorCode = airline.icao || airline.iata || airline.routeCode || "A320";
+  return `${operatorCode}${number}`;
 }
 
 function parseAirports(text) {
@@ -757,20 +760,71 @@ function parseAirports(text) {
 }
 
 function parseAirlines(text) {
-  return new Map(text.split(/\r?\n/).map(parseDatLine).filter(Boolean).map((row) => {
-    const icao = row[4];
-    return [icao, { code: icao, name: row[1] }];
-  }).filter(([code]) => code && code !== "\\N"));
+  const byId = new Map();
+  const byIata = new Map();
+  const byIcao = new Map();
+  const byAnyCode = new Map();
+
+  text.split(/\r?\n/).map(parseDatLine).filter(Boolean).forEach((row) => {
+    const airline = {
+      id: row[0],
+      name: row[1],
+      iata: row[3] && row[3] !== "\\N" ? row[3] : "",
+      icao: row[4] && row[4] !== "\\N" ? row[4] : "",
+    };
+
+    if (airline.id && airline.id !== "\\N") {
+      byId.set(airline.id, airline);
+    }
+    if (airline.iata) {
+      byIata.set(airline.iata, airline);
+      byAnyCode.set(airline.iata, airline);
+    }
+    if (airline.icao) {
+      byIcao.set(airline.icao, airline);
+      byAnyCode.set(airline.icao, airline);
+    }
+  });
+
+  return { byId, byIata, byIcao, byAnyCode };
 }
 
 function parseRoutes(text) {
   return text.split(/\r?\n/).map(parseDatLine).filter(Boolean).map((row) => ({
     airlineCode: row[0],
+    airlineId: row[1],
     from: normalizeAirportCode(row[2]),
     to: normalizeAirportCode(row[4]),
     stops: Number(row[7] || 0),
     equipment: (row[8] || "").split(/\s+/).filter(Boolean),
-  })).filter((route) => route.from && route.to && route.airlineCode);
+  })).filter((route) => route.from && route.to && (route.airlineCode || route.airlineId));
+}
+
+function resolveAirline(route) {
+  const byId = state.airlines.byId;
+  const byAnyCode = state.airlines.byAnyCode;
+  const found =
+    (route.airlineId ? byId.get(route.airlineId) : null)
+    || (route.airlineCode ? byAnyCode.get(route.airlineCode) : null);
+
+  if (found) {
+    return {
+      ...found,
+      routeCode: route.airlineCode || "",
+      icao: found.icao || found.iata || route.airlineCode || route.airlineId || "UNK",
+      iata: found.iata || "",
+      name: found.name || found.icao || route.airlineCode || "Unknown operator"
+    };
+  }
+
+  const fallbackCode = route.airlineCode || route.airlineId || "UNK";
+  return {
+    id: route.airlineId || "",
+    iata: "",
+    icao: fallbackCode,
+    routeCode: fallbackCode,
+    name: `Unknown operator (${fallbackCode})`
+  };
 }
 
 function parseDatLine(line) {
