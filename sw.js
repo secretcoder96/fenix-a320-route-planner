@@ -1,4 +1,4 @@
-const CACHE_NAME = "fenix-a320-route-planner-v2";
+const CACHE_NAME = "a320-virtual-pm-v1";
 const CORE_ASSETS = [
   "./",
   "./index.html",
@@ -6,6 +6,7 @@ const CORE_ASSETS = [
   "./app.js",
   "./manifest.webmanifest",
   "./icon.svg",
+  "./src/data/a320Procedures.js"
 ];
 
 self.addEventListener("install", (event) => {
@@ -28,16 +29,11 @@ self.addEventListener("fetch", (event) => {
   }
 
   const url = new URL(event.request.url);
-  const isAppShellAsset = url.origin === self.location.origin;
-
-  if (isAppShellAsset) {
-    event.respondWith(networkFirst(event.request));
+  if (url.origin !== self.location.origin) {
     return;
   }
 
-  event.respondWith(
-    caches.match(event.request).then((cached) => cached || fetch(event.request))
-  );
+  event.respondWith(networkFirst(event.request));
 });
 
 async function networkFirst(request) {
@@ -45,7 +41,7 @@ async function networkFirst(request) {
 
   try {
     const response = await fetch(request, { cache: "no-store" });
-    if (response && response.ok) {
+    if (response.ok) {
       cache.put(request, response.clone());
     }
     return response;

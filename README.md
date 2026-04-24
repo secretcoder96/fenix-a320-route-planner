@@ -1,38 +1,43 @@
-# Fenix A320 Route Planner
+# A320 Virtual PM
 
-Static iPad-friendly web app for choosing realistic Fenix A320 routes using:
-
-- live public VATSIM network data
-- public airport and airline data
-- public historical route data
+Standalone web app for Microsoft Flight Simulator that acts as a virtual Pilot Monitoring assistant for the Fenix A320.
 
 ## What it does
 
-- Takes Pacific local off-block and on-block input and converts it to UTC/Zulu using the actual date
-- Scores realistic A320-family routes in North America and Europe
-- Uses the live public VATSIM snapshot to favor routes with stronger current ATC coverage
-- Shows specific local ATC roles online at each airport, including top-down notes for APP/DEP coverage
-- Generates a SimBrief-ready export block for each suggested route
-- Lets you save favorite routes locally in the browser for quick reuse on iPad
-- Stores preferences in local browser storage
-- Works well in Safari on iPad and can be added to the Home Screen
+- Provides simulator-friendly A320 normal-procedure phases
+- Separates flows, challenge-response checklist items, and notes
+- Runs one PM challenge at a time with typed or spoken PF responses
+- Supports browser speech recognition and PM text-to-speech
+- Stores selected phase, mode, voice settings, progress, and callout log in local storage
+- Uses a dark Airbus-style utility layout suitable for a second monitor or tablet
 
-## Data sources
+## Procedure source
 
-- VATSIM public network feed: `https://data.vatsim.net/v3/vatsim-data.json`
-- OpenFlights public airport data: `airports-extended.dat`
-- OpenFlights public airline data: `airlines.dat`
-- OpenFlights public route data: `routes.dat`
+The app structure is organized from the A320 normal procedures PDF referenced in the project brief, but the UI wording is rewritten for practical single-pilot simulator use rather than copied from the source.
 
-## Deploy on GitHub Pages
+## Modes
 
-1. Push these files to a GitHub repository.
-2. In the repository settings, enable GitHub Pages from the default branch root.
-3. Open the published URL in Safari on iPad.
-4. Use Share -> Add to Home Screen.
+- Normal Mode: accepts practical response variations
+- Training Mode: shows hints during checklist work
+- Strict Mode: requires closer phrase matches
 
-## Notes
+## Voice support
 
-- Gate and terminal suggestions are estimates unless specifically verified elsewhere.
-- Coverage is based on the current public VATSIM snapshot, so it is best for near-term planning.
-- If browser CORS blocks any live feed on GitHub Pages, the next step would be adding a tiny serverless proxy.
+- Voice recognition uses the browser Web Speech API
+- PM voice readout uses `window.speechSynthesis`
+- Chrome or Edge is recommended for microphone support
+
+## Disclaimer
+
+This is a simulator training aid for the Fenix A320 and is not official Airbus, Fenix, airline, or training documentation.
+
+## Future expansion hooks
+
+- SimBrief import
+- VATSIM controller data
+- SimConnect aircraft state
+- Fenix aircraft state detection
+- Takeoff and landing performance
+- Abnormal procedures
+- Route-specific briefing generation
+- Gate and taxi briefing
