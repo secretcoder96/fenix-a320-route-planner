@@ -6,18 +6,25 @@ const STORAGE_KEYS = {
   voiceEnabled: "a320VirtualPm.voiceEnabled",
   autoSubmitVoice: "a320VirtualPm.autoSubmitVoice",
   progress: "a320VirtualPm.progress",
-  log: "a320VirtualPm.log"
+  log: "a320VirtualPm.log",
+  voiceUri: "a320VirtualPm.voiceUri",
+  speechRate: "a320VirtualPm.speechRate"
 };
 
 const ROOT = document.getElementById("app");
 const recognitionApi = window.SpeechRecognition || window.webkitSpeechRecognition;
+const DEFAULT_SPEECH_RATE = clamp(Number(localStorage.getItem(STORAGE_KEYS.speechRate) || "0.9"), 0.8, 1.05);
+const ACCEPTED_PHRASE = "CHECKED";
 
 const state = {
-  selectedPhaseId: localStorage.getItem(STORAGE_KEYS.phaseId) || PROCEDURES[0].id,
+  selectedPhaseId: localStorage.getItem(STORAGE_KEYS.phaseId) || "before-start",
   mode: localStorage.getItem(STORAGE_KEYS.mode) || "normal",
   voiceEnabled: localStorage.getItem(STORAGE_KEYS.voiceEnabled) !== "false",
   autoSubmitVoice: localStorage.getItem(STORAGE_KEYS.autoSubmitVoice) === "true",
+  selectedVoiceUri: localStorage.getItem(STORAGE_KEYS.voiceUri) || "",
+  speechRate: DEFAULT_SPEECH_RATE,
   isListening: false,
+  listeningDesired: false,
   interimTranscript: "",
   responseText: "",
   recognitionSupported: Boolean(recognitionApi),
@@ -25,13 +32,20 @@ const state = {
   log: loadLog(),
   complete: false,
   lastFeedback: "",
-  recognition: null
+  recognition: null,
+  voices: [],
+  speechToken: 0,
+  speechTimerIds: [],
+  lastVoiceTranscript: "",
+  lastVoiceTranscriptAt: 0,
+  lastSubmittedKey: "",
+  lastSubmittedAt: 0
 };
 
 function init() {
   ensureProgressShape();
   registerServiceWorker();
-  render();
+  setupVoices();
   setupSpeechRecognition();
   syncProcedureCompletion();
 }
@@ -69,6 +83,8 @@ function persistPreferences() {
   localStorage.setItem(STORAGE_KEYS.mode, state.mode);
   localStorage.setItem(STORAGE_KEYS.voiceEnabled, String(state.voiceEnabled));
   localStorage.setItem(STORAGE_KEYS.autoSubmitVoice, String(state.autoSubmitVoice));
+  localStorage.setItem(STORAGE_KEYS.voiceUri, state.selectedVoiceUri);
+  localStorage.setItem(STORAGE_KEYS.speechRate, String(state.speechRate));
 }
 
 function persistProgress() {
@@ -87,19 +103,14 @@ function getProgress(procedureId = state.selectedPhaseId) {
   return state.progress[procedureId] || { itemIndex: 0, complete: false };
 }
 
-function getCurrentItem() {
-  const procedure = getProcedure();
-  const progress = getProgress();
+function getCurrentItem(procedure = getProcedure(), progress = getProgress(procedure.id)) {
   return procedure.items[progress.itemIndex] || null;
 }
 
 function getCompletionPercent() {
   const procedure = getProcedure();
   const progress = getProgress();
-  if (!procedure.items.length) {
-    return 100;
-  }
-  if (progress.complete) {
+  if (!procedure.items.length || progress.complete) {
     return 100;
   }
   return Math.round((progress.itemIndex / procedure.items.length) * 100);
@@ -110,7 +121,7 @@ function syncProcedureCompletion() {
   render();
 }
 
-function addLog(source, message, tone = "neutral") {
+function addLog(source, message, tone = "neutral", shouldRender = true) {
   state.log.unshift({
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     source,
@@ -122,15 +133,22 @@ function addLog(source, message, tone = "neutral") {
     })
   });
   persistLog();
-  render();
+  if (shouldRender) {
+    render();
+  }
 }
 
 function normalizeText(value) {
-  return value
+  return String(value || "")
     .toUpperCase()
-    .replace(/[.,/#!$%^&*;:{}=\-_`~()?"']/g, " ")
+    .replace(/[.,#!$%^&*;:{}=\-_`~()?"']/g, " ")
+    .replace(/\//g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function buildAcceptedForms(item) {
@@ -148,6 +166,8 @@ function buildAcceptedForms(item) {
       if (form === "UP") forms.add("RETRACTED");
       if (form === "RETRACTED") forms.add("UP");
       if (form === "OFF") forms.add("SHUTDOWN");
+      if (form === "CLOSED") forms.add("CLOSE");
+      if (form === "OPEN") forms.add("OPENED");
     }
   }
 
@@ -160,16 +180,15 @@ function evaluateResponse(item, rawResponse) {
     return { accepted: false, reason: "Enter or speak a response first." };
   }
 
-  const acceptedForms = buildAcceptedForms(item);
   const strictForms = new Set((item.expected || []).map(normalizeText));
-  const validForms = state.mode === "strict" ? strictForms : acceptedForms;
+  const validForms = state.mode === "strict" ? strictForms : buildAcceptedForms(item);
 
   if (validForms.has(response)) {
     return { accepted: true };
   }
 
   const challengeText = normalizeText(item.challenge);
-  if (response.startsWith(challengeText)) {
+  if (response.startsWith(`${challengeText} `)) {
     const trimmed = response.slice(challengeText.length).trim();
     if (trimmed && validForms.has(trimmed)) {
       return { accepted: true };
@@ -178,23 +197,118 @@ function evaluateResponse(item, rawResponse) {
 
   return {
     accepted: false,
-    reason: `Expected ${Array.from(strictForms).join(" or ")}.`,
+    reason: `Expected ${Array.from(strictForms).join(" or ")}.`
   };
 }
 
-function speak(text) {
+function formatForSpeech(text, options = {}) {
+  if (!text) {
+    return "";
+  }
+
+  let spoken = String(text).trim();
+  const replacements = [
+    [/A\/THR/gi, "Auto thrust"],
+    [/EXT PWR/gi, "External power"],
+    [/\bQNH\b/gi, "Q N H"],
+    [/\bADIRS\b/gi, "A D I R S"],
+    [/\bTCAS\b/gi, "T C A S"],
+    [/\bMCDU\b/gi, "M C D U"],
+    [/\bFMGS\b/gi, "F M G S"],
+    [/\bECAM\b/gi, "E C A M"],
+    [/\bILS\b/gi, "I L S"],
+    [/\bRNAV\b/gi, "R N A V"],
+    [/\bAPU\b/gi, "A P U"],
+    [/\bVATSIM\b/gi, "Vat sim"]
+  ];
+
+  for (const [pattern, replacement] of replacements) {
+    spoken = spoken.replace(pattern, replacement);
+  }
+
+  spoken = spoken.replace(/\//g, " ");
+  spoken = spoken.replace(/\s+/g, " ").trim();
+
+  if (options.kind === "challenge") {
+    spoken = spoken.toLowerCase().replace(/\b\w/g, (char) => char.toUpperCase());
+    if (!/[?.!]$/.test(spoken)) {
+      spoken += "?";
+    }
+    return spoken;
+  }
+
+  if (options.kind === "title") {
+    spoken = spoken.toLowerCase().replace(/\b\w/g, (char) => char.toUpperCase());
+    return spoken;
+  }
+
+  return spoken;
+}
+
+function clearSpeechQueue() {
+  state.speechToken += 1;
+  for (const timerId of state.speechTimerIds) {
+    window.clearTimeout(timerId);
+  }
+  state.speechTimerIds = [];
+  if ("speechSynthesis" in window) {
+    window.speechSynthesis.cancel();
+  }
+}
+
+function getSelectedVoice() {
+  return state.voices.find((voice) => voice.voiceURI === state.selectedVoiceUri) || null;
+}
+
+function speakNow(text, options = {}) {
   if (!state.voiceEnabled || !("speechSynthesis" in window)) {
     return;
   }
-  window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = "en-US";
-  utterance.rate = 0.97;
-  utterance.pitch = 0.95;
+
+  if (options.cancelFirst !== false) {
+    window.speechSynthesis.cancel();
+  }
+  const utterance = new SpeechSynthesisUtterance(formatForSpeech(text, options));
+  const selectedVoice = getSelectedVoice();
+  utterance.lang = selectedVoice?.lang || "en-US";
+  utterance.voice = selectedVoice;
+  utterance.rate = state.speechRate;
+  utterance.pitch = 0.96;
+  utterance.volume = 1;
   window.speechSynthesis.speak(utterance);
 }
 
+function queuePmSpeech(steps) {
+  if (!state.voiceEnabled || !("speechSynthesis" in window) || !steps.length) {
+    return;
+  }
+
+  clearSpeechQueue();
+  const token = state.speechToken;
+  let elapsed = 0;
+
+  for (let index = 0; index < steps.length; index += 1) {
+    const step = steps[index];
+    elapsed += step.delayBefore ?? 0;
+    const timerId = window.setTimeout(() => {
+      if (token !== state.speechToken) {
+        return;
+      }
+      speakNow(step.text, { ...(step.options || {}), cancelFirst: index === 0 });
+    }, elapsed);
+    state.speechTimerIds.push(timerId);
+  }
+}
+
+function setResponseText(value, shouldRender = true) {
+  state.responseText = value;
+  if (shouldRender) {
+    render();
+  }
+}
+
 function selectPhase(phaseId) {
+  clearSpeechQueue();
   state.selectedPhaseId = phaseId;
   state.responseText = "";
   state.interimTranscript = "";
@@ -204,135 +318,196 @@ function selectPhase(phaseId) {
 }
 
 function startChecklist() {
+  clearSpeechQueue();
   const procedure = getProcedure();
-  const progress = getProgress();
+  const progress = getProgress(procedure.id);
+  const resetProgress = progress.complete ? { itemIndex: 0, complete: false } : progress;
 
-  if (progress.complete) {
-    state.progress[procedure.id] = { itemIndex: 0, complete: false };
-    persistProgress();
-  }
-
+  state.progress[procedure.id] = resetProgress;
+  state.complete = false;
+  state.responseText = "";
+  state.interimTranscript = "";
   state.lastFeedback = "";
-  const current = getCurrentItem();
-  addLog("PM", procedure.title.toUpperCase(), "info");
-  speak(procedure.title);
-  if (current) {
-    addLog("PM", current.challenge, "info");
-    speak(current.challenge);
+  state.lastSubmittedKey = "";
+  state.lastSubmittedAt = 0;
+  persistProgress();
+
+  const firstItem = getCurrentItem(procedure, resetProgress);
+  addLog("PM", procedure.title.toUpperCase(), "info", false);
+  if (firstItem) {
+    addLog("PM", firstItem.challenge, "info", false);
   }
-  syncProcedureCompletion();
+  render();
+
+  if (firstItem) {
+    queuePmSpeech([
+      { text: procedure.title, options: { kind: "title" }, delayBefore: 0 },
+      { text: firstItem.challenge, options: { kind: "challenge" }, delayBefore: 450 }
+    ]);
+  } else {
+    queuePmSpeech([{ text: `${procedure.title} complete`, options: { kind: "title" }, delayBefore: 0 }]);
+  }
 }
 
-function submitResponse(forcedResponse = null) {
+function advanceToNextItem(procedure, currentIndex) {
+  const nextIndex = currentIndex + 1;
+  const isComplete = nextIndex >= procedure.items.length;
+
+  state.progress[procedure.id] = {
+    itemIndex: isComplete ? procedure.items.length : nextIndex,
+    complete: isComplete
+  };
+  state.complete = isComplete;
+  state.responseText = "";
+  state.interimTranscript = "";
+  state.lastFeedback = "Accepted.";
+  persistProgress();
+
+  addLog("PM", ACCEPTED_PHRASE, "success", false);
+
+  if (isComplete) {
+    addLog("PM", `${procedure.title.toUpperCase()} COMPLETE`, "success", false);
+    render();
+    queuePmSpeech([
+      { text: ACCEPTED_PHRASE, delayBefore: 0 },
+      { text: `${procedure.title} complete`, options: { kind: "title" }, delayBefore: 450 }
+    ]);
+    return;
+  }
+
+  const nextItem = procedure.items[nextIndex];
+  addLog("PM", nextItem.challenge, "info", false);
+  render();
+  queuePmSpeech([
+    { text: ACCEPTED_PHRASE, delayBefore: 0 },
+    { text: nextItem.challenge, options: { kind: "challenge" }, delayBefore: 450 }
+  ]);
+}
+
+function submitResponse(forcedResponse = null, source = "typed") {
   const procedure = getProcedure();
-  const item = getCurrentItem();
+  const progress = getProgress(procedure.id);
+  const item = getCurrentItem(procedure, progress);
 
   if (!item) {
     return;
   }
 
-  const response = forcedResponse ?? state.responseText;
-  const result = evaluateResponse(item, response);
-  addLog("PF", normalizeText(response) || "(NO RESPONSE)", result.accepted ? "success" : "warn");
+  const response = String(forcedResponse ?? state.responseText ?? "").trim();
+  const normalizedResponse = normalizeText(response);
+  const submissionKey = `${procedure.id}:${progress.itemIndex}:${normalizedResponse}`;
 
-  if (!result.accepted) {
-    state.lastFeedback = result.reason;
-    addLog("PM", state.mode === "training" ? `${result.reason} ${item.hint}` : result.reason, "warn");
-    speak("Not accepted");
+  if (!normalizedResponse) {
+    state.lastFeedback = "Enter or speak a response first.";
     render();
     return;
   }
 
-  state.lastFeedback = "Accepted.";
-  addLog("PM", "ACCEPTED", "success");
-  speak("Accepted");
-
-  const progress = getProgress();
-  const nextIndex = progress.itemIndex + 1;
-  const isComplete = nextIndex >= procedure.items.length;
-  state.progress[procedure.id] = {
-    itemIndex: isComplete ? procedure.items.length : nextIndex,
-    complete: isComplete
-  };
-  persistProgress();
-  state.responseText = "";
-
-  if (isComplete) {
-    state.complete = true;
-    addLog("PM", `${procedure.title.toUpperCase()} COMPLETE`, "success");
-    speak(`${procedure.title} complete`);
-  } else {
-    const nextItem = procedure.items[nextIndex];
-    addLog("PM", nextItem.challenge, "info");
-    speak(nextItem.challenge);
+  if (source === "voice" && submissionKey === state.lastSubmittedKey && Date.now() - state.lastSubmittedAt < 1500) {
+    return;
   }
 
-  render();
+  const result = evaluateResponse(item, response);
+  state.lastSubmittedKey = submissionKey;
+  state.lastSubmittedAt = Date.now();
+  addLog("PF", normalizedResponse, result.accepted ? "success" : "warn", false);
+
+  if (!result.accepted) {
+    state.lastFeedback = result.reason;
+    addLog("PM", state.mode === "training" ? `${result.reason} ${item.hint}` : result.reason, "warn", false);
+    render();
+    queuePmSpeech([{ text: "Not accepted", delayBefore: 0 }]);
+    return;
+  }
+
+  advanceToNextItem(procedure, progress.itemIndex);
 }
 
 function previousItem() {
+  clearSpeechQueue();
   const procedure = getProcedure();
-  const progress = getProgress();
-  const itemIndex = Math.max(0, Math.min(progress.itemIndex - 1, procedure.items.length - 1));
+  const progress = getProgress(procedure.id);
+  const maxIndex = Math.max(0, procedure.items.length - 1);
+  const itemIndex = Math.max(0, Math.min(progress.itemIndex - 1, maxIndex));
   state.progress[procedure.id] = { itemIndex, complete: false };
-  persistProgress();
+  state.complete = false;
   state.lastFeedback = "";
+  state.responseText = "";
+  state.interimTranscript = "";
+  persistProgress();
+
   const item = getCurrentItem();
   if (item) {
-    addLog("PM", `PREVIOUS: ${item.challenge}`, "info");
-    speak(item.challenge);
+    addLog("PM", `PREVIOUS: ${item.challenge}`, "info", false);
   }
-  syncProcedureCompletion();
+  render();
+
+  if (item) {
+    queuePmSpeech([{ text: item.challenge, options: { kind: "challenge" }, delayBefore: 0 }]);
+  }
 }
 
 function skipItem() {
+  clearSpeechQueue();
   const procedure = getProcedure();
-  const item = getCurrentItem();
+  const progress = getProgress(procedure.id);
+  const item = getCurrentItem(procedure, progress);
   if (!item) {
     return;
   }
-  addLog("PM", `SKIPPED: ${item.challenge}`, "warn");
-  const progress = getProgress();
+
+  addLog("PM", `SKIPPED: ${item.challenge}`, "warn", false);
   const nextIndex = progress.itemIndex + 1;
   const isComplete = nextIndex >= procedure.items.length;
   state.progress[procedure.id] = {
     itemIndex: isComplete ? procedure.items.length : nextIndex,
     complete: isComplete
   };
+  state.complete = isComplete;
+  state.responseText = "";
+  state.interimTranscript = "";
+  state.lastFeedback = "";
   persistProgress();
 
   if (isComplete) {
-    addLog("PM", `${procedure.title.toUpperCase()} COMPLETE`, "success");
-    speak(`${procedure.title} complete`);
-  } else {
-    const nextItem = procedure.items[nextIndex];
-    addLog("PM", nextItem.challenge, "info");
-    speak(nextItem.challenge);
+    addLog("PM", `${procedure.title.toUpperCase()} COMPLETE`, "success", false);
+    render();
+    queuePmSpeech([{ text: `${procedure.title} complete`, options: { kind: "title" }, delayBefore: 0 }]);
+    return;
   }
 
-  syncProcedureCompletion();
+  const nextItem = procedure.items[nextIndex];
+  addLog("PM", nextItem.challenge, "info", false);
+  render();
+  queuePmSpeech([{ text: nextItem.challenge, options: { kind: "challenge" }, delayBefore: 350 }]);
 }
 
 function resetChecklist() {
+  clearSpeechQueue();
   const procedure = getProcedure();
   state.progress[procedure.id] = { itemIndex: 0, complete: false };
-  persistProgress();
+  state.complete = false;
   state.responseText = "";
+  state.interimTranscript = "";
   state.lastFeedback = "";
-  addLog("PM", `RESET ${procedure.title.toUpperCase()}`, "warn");
-  speak("Checklist reset");
-  syncProcedureCompletion();
+  state.lastSubmittedKey = "";
+  state.lastSubmittedAt = 0;
+  persistProgress();
+  addLog("PM", `RESET ${procedure.title.toUpperCase()}`, "warn", false);
+  render();
+  queuePmSpeech([{ text: "Checklist reset", delayBefore: 0 }]);
 }
 
 function repeatItem() {
   const procedure = getProcedure();
   const item = getCurrentItem();
   if (!item) {
-    speak(`${procedure.title} complete`);
+    queuePmSpeech([{ text: `${procedure.title} complete`, options: { kind: "title" }, delayBefore: 0 }]);
     return;
   }
-  addLog("PM", `REPEAT: ${item.challenge}`, "info");
-  speak(item.challenge);
+  addLog("PM", `REPEAT: ${item.challenge}`, "info", false);
+  render();
+  queuePmSpeech([{ text: item.challenge, options: { kind: "challenge" }, delayBefore: 0 }]);
 }
 
 function clearLog() {
@@ -345,14 +520,17 @@ function changeMode(modeId) {
   state.mode = modeId;
   state.lastFeedback = "";
   persistPreferences();
-  addLog("PM", `${modeId.toUpperCase()} MODE`, "info");
-  speak(modeId.replace(/^\w/, (char) => char.toUpperCase()) + " mode");
+  addLog("PM", `${modeId.toUpperCase()} MODE`, "info", false);
   render();
+  queuePmSpeech([{ text: `${modeId} mode`, delayBefore: 0 }]);
 }
 
 function toggleVoiceEnabled() {
   state.voiceEnabled = !state.voiceEnabled;
   persistPreferences();
+  if (!state.voiceEnabled) {
+    clearSpeechQueue();
+  }
   render();
 }
 
@@ -362,7 +540,20 @@ function toggleAutoSubmit() {
   render();
 }
 
+function updateSelectedVoice(voiceUri) {
+  state.selectedVoiceUri = voiceUri;
+  persistPreferences();
+  render();
+}
+
+function updateSpeechRate(value) {
+  state.speechRate = clamp(Number(value), 0.8, 1.05);
+  persistPreferences();
+  render();
+}
+
 function stopListening() {
+  state.listeningDesired = false;
   if (state.recognition) {
     state.recognition.stop();
   }
@@ -389,7 +580,9 @@ function handleCommand(command) {
   if (!action) {
     return false;
   }
-  addLog("VOICE", normalized.toUpperCase(), "info");
+
+  addLog("VOICE", normalized.toUpperCase(), "info", false);
+  render();
   action();
   return true;
 }
@@ -398,8 +591,48 @@ function startListening() {
   if (!state.recognition) {
     return;
   }
+
+  state.listeningDesired = true;
   state.interimTranscript = "";
-  state.recognition.start();
+  try {
+    state.recognition.start();
+  } catch {
+    // Recognition can throw if already active. Keep desired state true.
+  }
+}
+
+function processFinalTranscript(finalText) {
+  const normalizedFinal = normalizeText(finalText);
+  const now = Date.now();
+
+  if (!normalizedFinal) {
+    return;
+  }
+
+  if (normalizedFinal === state.lastVoiceTranscript && now - state.lastVoiceTranscriptAt < 1400) {
+    return;
+  }
+
+  state.lastVoiceTranscript = normalizedFinal;
+  state.lastVoiceTranscriptAt = now;
+
+  if (handleCommand(finalText)) {
+    state.responseText = "";
+    state.interimTranscript = "";
+    render();
+    return;
+  }
+
+  setResponseText(finalText, false);
+  state.interimTranscript = "";
+  addLog("VOICE", `HEARD: ${normalizedFinal}`, "info", false);
+  render();
+
+  if (state.autoSubmitVoice) {
+    window.setTimeout(() => {
+      submitResponse(finalText, "voice");
+    }, 120);
+  }
 }
 
 function setupSpeechRecognition() {
@@ -420,52 +653,109 @@ function setupSpeechRecognition() {
   recognition.onend = () => {
     state.isListening = false;
     render();
+
+    if (!state.listeningDesired) {
+      return;
+    }
+
+    window.setTimeout(() => {
+      if (!state.listeningDesired) {
+        return;
+      }
+      try {
+        recognition.start();
+      } catch {
+        // Allow the active session to continue if the browser restarted automatically.
+      }
+    }, 250);
   };
 
   recognition.onerror = (event) => {
     state.isListening = false;
-    addLog("VOICE", `RECOGNITION ERROR: ${event.error.toUpperCase()}`, "warn");
-    render();
+    addLog("VOICE", `RECOGNITION ERROR: ${String(event.error || "unknown").toUpperCase()}`, "warn");
+
+    if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+      state.listeningDesired = false;
+    }
   };
 
   recognition.onresult = (event) => {
-    let finalTranscript = "";
+    const finalPhrases = [];
     let interimTranscript = "";
 
     for (let i = event.resultIndex; i < event.results.length; i += 1) {
-      const transcript = event.results[i][0].transcript.trim();
+      const transcript = String(event.results[i][0].transcript || "").trim();
+      if (!transcript) {
+        continue;
+      }
+
       if (event.results[i].isFinal) {
-        finalTranscript += `${transcript} `;
+        finalPhrases.push(transcript);
       } else {
         interimTranscript += `${transcript} `;
       }
     }
 
     state.interimTranscript = interimTranscript.trim();
-
-    const finalText = finalTranscript.trim();
-    if (!finalText) {
-      render();
-      return;
-    }
-
-    if (handleCommand(finalText)) {
-      state.responseText = "";
-      state.interimTranscript = "";
-      render();
-      return;
-    }
-
-    state.responseText = finalText;
-    addLog("VOICE", `HEARD: ${normalizeText(finalText)}`, "info");
     render();
 
-    if (state.autoSubmitVoice) {
-      submitResponse(finalText);
+    for (const phrase of finalPhrases) {
+      processFinalTranscript(phrase);
     }
   };
 
   state.recognition = recognition;
+}
+
+function pickPreferredVoice(voices) {
+  if (!voices.length) {
+    return "";
+  }
+
+  const scoreVoice = (voice) => {
+    let score = 0;
+    const text = `${voice.name} ${voice.voiceURI}`.toLowerCase();
+    if (voice.lang?.toLowerCase().startsWith("en-us")) score += 6;
+    else if (voice.lang?.toLowerCase().startsWith("en-gb")) score += 5;
+    else if (voice.lang?.toLowerCase().startsWith("en")) score += 4;
+    if (text.includes("natural")) score += 8;
+    if (text.includes("aria")) score += 7;
+    if (text.includes("jenny")) score += 7;
+    if (text.includes("guy")) score += 5;
+    if (text.includes("samantha")) score += 6;
+    if (text.includes("google")) score += 4;
+    if (text.includes("microsoft")) score += 4;
+    if (voice.default) score += 3;
+    return score;
+  };
+
+  return [...voices].sort((a, b) => scoreVoice(b) - scoreVoice(a))[0]?.voiceURI || voices[0].voiceURI;
+}
+
+function setupVoices() {
+  if (!("speechSynthesis" in window)) {
+    render();
+    return;
+  }
+
+  const loadVoices = () => {
+    const voices = window.speechSynthesis.getVoices().filter((voice) => /^en/i.test(voice.lang));
+    state.voices = voices;
+
+    if (!voices.some((voice) => voice.voiceURI === state.selectedVoiceUri)) {
+      state.selectedVoiceUri = pickPreferredVoice(voices);
+      persistPreferences();
+    }
+
+    render();
+  };
+
+  loadVoices();
+  if (typeof window.speechSynthesis.addEventListener === "function") {
+    window.speechSynthesis.addEventListener("voiceschanged", loadVoices);
+  } else {
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+  }
 }
 
 function getModeMeta() {
@@ -479,6 +769,7 @@ function render() {
   const currentIndex = progress.complete ? procedure.items.length : Math.min(progress.itemIndex + 1, procedure.items.length);
   const modeMeta = getModeMeta();
   const percent = getCompletionPercent();
+  const selectedVoice = getSelectedVoice();
 
   ROOT.innerHTML = `
     <div class="app-shell">
@@ -644,10 +935,28 @@ function render() {
               <button class="primary-button large" data-action="start-listening" ${state.recognitionSupported ? "" : "disabled"}>Start Listening</button>
               <button class="secondary-button large" data-action="stop-listening" ${state.recognitionSupported ? "" : "disabled"}>Stop Listening</button>
             </div>
+            <div class="voice-config">
+              <label>
+                <span>PM voice</span>
+                <select id="voice-select" data-action="voice-select">
+                  ${state.voices.length ? state.voices.map((voice) => `
+                    <option value="${escapeHtml(voice.voiceURI)}" ${voice.voiceURI === selectedVoice?.voiceURI ? "selected" : ""}>
+                      ${escapeHtml(`${voice.name} (${voice.lang})`)}
+                    </option>
+                  `).join("") : `<option value="">Loading voices...</option>`}
+                </select>
+              </label>
+              <label>
+                <span>Speech rate</span>
+                <input id="speech-rate" data-action="speech-rate" type="range" min="0.8" max="1.05" step="0.01" value="${state.speechRate}">
+                <small>${state.speechRate.toFixed(2)}x</small>
+              </label>
+            </div>
             <p class="voice-state ${state.isListening ? "live" : ""}">${state.isListening ? "Listening for responses and voice commands..." : "Voice recognition idle."}</p>
             ${state.recognitionSupported ? `
               <ul class="command-list">
                 <li>Voice commands: start checklist, repeat item, next item, previous item, skip item, reset checklist, stop listening, normal mode, training mode, strict mode, clear log.</li>
+                <li>Quick test: use the Before Start checklist to verify cockpit preparation, doors, and beacon progression.</li>
               </ul>
             ` : `
               <p class="unsupported">Voice recognition is not supported in this browser. Use Chrome or Edge, or type your response.</p>
@@ -716,6 +1025,20 @@ function bindUI() {
     });
   }
 
+  const voiceSelect = ROOT.querySelector("#voice-select");
+  if (voiceSelect) {
+    voiceSelect.addEventListener("change", (event) => {
+      updateSelectedVoice(event.target.value);
+    });
+  }
+
+  const speechRate = ROOT.querySelector("#speech-rate");
+  if (speechRate) {
+    speechRate.addEventListener("input", (event) => {
+      updateSpeechRate(event.target.value);
+    });
+  }
+
   const actionMap = {
     "start-checklist": startChecklist,
     "submit-response": () => submitResponse(),
@@ -732,7 +1055,7 @@ function bindUI() {
 
   ROOT.querySelectorAll("[data-action]").forEach((element) => {
     const action = element.dataset.action;
-    if (!actionMap[action] || action === "mode" || action === "select-phase") {
+    if (!actionMap[action] || action === "mode" || action === "select-phase" || action === "voice-select" || action === "speech-rate") {
       return;
     }
 

@@ -35,7 +35,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -119,7 +120,8 @@ h3 {
 .mode-group,
 .toggle-row,
 .runner-actions,
-.voice-actions {
+.voice-actions,
+.voice-config {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
@@ -419,6 +421,37 @@ h3 {
 .voice-state,
 .unsupported {
   margin-top: 10px;
+}
+
+.voice-config {
+  margin-top: 14px;
+  align-items: flex-end;
+}
+
+.voice-config label {
+  display: grid;
+  gap: 6px;
+  flex: 1;
+  min-width: 180px;
+  color: var(--text);
+}
+
+.voice-config select,
+.voice-config input[type="range"] {
+  width: 100%;
+}
+
+.voice-config select {
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(222, 244, 255, 0.95);
+  color: #072032;
+}
+
+.voice-config small {
+  color: var(--muted);
 }
 
 .log-entry {
