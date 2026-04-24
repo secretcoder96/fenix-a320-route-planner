@@ -746,7 +746,7 @@ function suggestFlightNumber(airline, from, to) {
 }
 
 function parseAirports(text) {
-  return text.split(/\r?\n/).map(parseDatLine).filter(Boolean).map((row) => ({
+  return parseCsvRows(text).map((row) => ({
     icao: row[5],
     iata: row[4],
     name: row[1],
@@ -765,7 +765,7 @@ function parseAirlines(text) {
   const byIcao = new Map();
   const byAnyCode = new Map();
 
-  text.split(/\r?\n/).map(parseDatLine).filter(Boolean).forEach((row) => {
+  parseCsvRows(text).forEach((row) => {
     const airline = {
       id: row[0],
       name: row[1],
@@ -790,7 +790,7 @@ function parseAirlines(text) {
 }
 
 function parseRoutes(text) {
-  return text.split(/\r?\n/).map(parseDatLine).filter(Boolean).map((row) => ({
+  return parseCsvRows(text).map((row) => ({
     airlineCode: row[0],
     airlineId: row[1],
     from: normalizeAirportCode(row[2]),
@@ -827,18 +827,15 @@ function resolveAirline(route) {
   };
 }
 
-function parseDatLine(line) {
-  if (!line) {
-    return null;
-  }
-
-  const values = [];
+function parseCsvRows(text) {
+  const rows = [];
+  let row = [];
   let current = "";
   let inQuotes = false;
 
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index];
-    const next = line[index + 1];
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = text[index + 1];
 
     if (char === "\"") {
       if (inQuotes && next === "\"") {
@@ -851,16 +848,36 @@ function parseDatLine(line) {
     }
 
     if (char === "," && !inQuotes) {
-      values.push(current);
+      row.push(current.trim());
       current = "";
+      continue;
+    }
+
+    if (char === "\n" && !inQuotes) {
+      row.push(current.trim());
+      if (row.some((value) => value !== "")) {
+        rows.push(row);
+      }
+      row = [];
+      current = "";
+      continue;
+    }
+
+    if (char === "\r" && !inQuotes) {
       continue;
     }
 
     current += char;
   }
 
-  values.push(current);
-  return values.map((value) => value.trim());
+  if (current.length || row.length) {
+    row.push(current.trim());
+    if (row.some((value) => value !== "")) {
+      rows.push(row);
+    }
+  }
+
+  return rows;
 }
 
 function normalizeAirportCode(code) {
