@@ -20,7 +20,7 @@ const state = {
   selectedPhaseId: localStorage.getItem(STORAGE_KEYS.phaseId) || "before-start",
   mode: localStorage.getItem(STORAGE_KEYS.mode) || "normal",
   voiceEnabled: localStorage.getItem(STORAGE_KEYS.voiceEnabled) !== "false",
-  autoSubmitVoice: localStorage.getItem(STORAGE_KEYS.autoSubmitVoice) === "true",
+  autoSubmitVoice: localStorage.getItem(STORAGE_KEYS.autoSubmitVoice) !== "false",
   selectedVoiceUri: localStorage.getItem(STORAGE_KEYS.voiceUri) || "",
   speechRate: DEFAULT_SPEECH_RATE,
   isListening: false,
