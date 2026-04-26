@@ -117,9 +117,25 @@ function markPhaseComplete() {
 }
 
 function selectPhase(id) {
+  if (!SOP_PHASES.some((phase) => phase.id === id)) {
+    return;
+  }
   state.selectedPhaseId = id;
   persistSelectedPhase();
   render();
+}
+
+function renderPhaseSelect(activePhaseId) {
+  return `
+    <label class="phase-select-label">
+      <span>Open SOP phase</span>
+      <select class="phase-select" data-phase-select>
+        ${SOP_PHASES.map((item) => `
+          <option value="${item.id}" ${item.id === activePhaseId ? "selected" : ""}>${item.phase}</option>
+        `).join("")}
+      </select>
+    </label>
+  `;
 }
 
 function renderCheckboxList(items, sectionKey, stateKey) {
@@ -137,10 +153,52 @@ function renderCheckboxList(items, sectionKey, stateKey) {
   `).join("");
 }
 
+function splitChecklistItems(items) {
+  return items.reduce((groups, item, index) => {
+    const owner = String(item.owner || "").toUpperCase();
+    if (owner === "PF") {
+      groups.pf.push({ ...item, index });
+    } else if (owner === "PM") {
+      groups.pm.push({ ...item, index });
+    } else {
+      groups.shared.push({ ...item, index });
+    }
+    return groups;
+  }, { pf: [], pm: [], shared: [] });
+}
+
+function renderChecklistGroup(items, title, subtitle, stateKey) {
+  if (!items.length) {
+    return "";
+  }
+
+  return `
+    <div class="flow-card">
+      <h4><span class="owner-tag">${title}</span></h4>
+      <p class="group-note">${subtitle}</p>
+      <div class="checklist-grid">
+        ${items.map((item) => `
+          <label class="check-card">
+            <div class="check-row">
+              <input type="checkbox" data-section="checklist" data-index="${item.index}" ${stateKey[item.index] ? "checked" : ""}>
+              <div>
+                <div class="check-title">${item.title}</div>
+                <div class="check-response">${item.owner} · ${item.response}</div>
+                ${item.note ? `<div class="check-note">${item.note}</div>` : ""}
+              </div>
+            </div>
+          </label>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
 function render() {
   const phase = getPhase();
   const phaseState = getPhaseState();
   const completion = getCompletion(phase);
+  const checklistGroups = splitChecklistItems(phase.checklist);
 
   root.innerHTML = `
     <div class="check-shell">
@@ -165,6 +223,7 @@ function render() {
               <p class="phase-meta">${SOP_PHASES.length} SOP phases</p>
             </div>
           </div>
+          ${renderPhaseSelect(phase.id)}
           <div class="phase-list">
             ${SOP_PHASES.map((item) => `
               <button class="phase-button ${item.id === phase.id ? "active" : ""}" data-phase="${item.id}">
@@ -219,10 +278,14 @@ function render() {
             <div class="section-header">
               <div>
                 <h3>Checklist</h3>
-                <p>Serious non-verbal checkbox checklist with expected response references.</p>
+                <p>Serious non-verbal checkbox checklist split by PF and PM responsibility.</p>
               </div>
             </div>
-            <div class="checklist-grid">${renderCheckboxList(phase.checklist, "checklist", phaseState.checklist)}</div>
+            <div class="flow-columns">
+              ${renderChecklistGroup(checklistGroups.pf, "PF Checklist", "Items primarily actioned or confirmed by the pilot flying.", phaseState.checklist)}
+              ${renderChecklistGroup(checklistGroups.pm, "PM Checklist", "Items primarily monitored or cross-checked by the pilot monitoring.", phaseState.checklist)}
+            </div>
+            ${renderChecklistGroup(checklistGroups.shared, "Shared Checklist", "Cross-check items where both seats participate or confirm together.", phaseState.checklist)}
           </section>
 
           <section class="subpanel">
@@ -279,8 +342,16 @@ function render() {
 }
 
 function bindEvents() {
-  root.querySelectorAll("[data-phase]").forEach((button) => {
-    button.addEventListener("click", () => selectPhase(button.dataset.phase));
+  root.querySelector("[data-phase-select]").addEventListener("change", (event) => {
+    selectPhase(event.target.value);
+  });
+
+  root.querySelector(".phase-list").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-phase]");
+    if (!button) {
+      return;
+    }
+    selectPhase(button.dataset.phase);
   });
 
   root.querySelectorAll("input[type='checkbox'][data-section]").forEach((checkbox) => {
