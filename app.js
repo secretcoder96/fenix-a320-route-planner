@@ -124,6 +124,63 @@ const RECENT_ROUTES_LIMIT = 18;
 
 const SOCAL_AIRPORTS = new Set(["KSAN", "KLAX", "KSNA", "KONT", "KBUR", "KLGB", "KPSP", "MMTJ"]);
 
+const LOCAL_ATC_SUFFIXES = new Set(["DEL", "GND", "TWR", "APP", "DEP", "ATIS"]);
+const STAFFED_ATC_SUFFIXES = new Set(["DEL", "GND", "TWR", "APP", "DEP"]);
+const AIRPORT_ATC_PREFIXES = {
+  KSAN: ["SAN", "SCT"],
+  KLAX: ["LAX", "SCT"],
+  KSNA: ["SNA", "SCT"],
+  KONT: ["ONT", "SCT"],
+  KBUR: ["BUR", "SCT"],
+  KLGB: ["LGB", "SCT"],
+  KPSP: ["PSP", "SCT"],
+  KLAS: ["LAS", "L30"],
+  KPHX: ["PHX", "P50"],
+  KSFO: ["SFO", "NCT"],
+  KOAK: ["OAK", "NCT"],
+  KSJC: ["SJC", "NCT"],
+  KSMF: ["SMF", "NCT"],
+  KRNO: ["RNO", "NCT"],
+  KSEA: ["SEA"],
+  KPDX: ["PDX"],
+  KSLC: ["SLC", "S56"],
+  KDEN: ["DEN", "D01"],
+  KABQ: ["ABQ"],
+  KELP: ["ELP"],
+  KDFW: ["DFW", "D10"],
+  KDAL: ["DAL", "D10"],
+  KAUS: ["AUS"],
+  KSAT: ["SAT"],
+  KIAH: ["IAH", "I90"],
+  KHOU: ["HOU", "I90"],
+  KOKC: ["OKC"],
+  KMCI: ["MCI"],
+  KSTL: ["STL"],
+  KMSP: ["MSP"],
+  KORD: ["ORD", "C90"],
+  KMDW: ["MDW", "C90"],
+  KDTW: ["DTW", "D21"],
+  KCLE: ["CLE"],
+  KIND: ["IND"],
+  KATL: ["ATL", "A80"],
+  KCLT: ["CLT"],
+  KIAD: ["IAD", "PCT"],
+  KDCA: ["DCA", "PCT"],
+  KBWI: ["BWI", "PCT"],
+  KPHL: ["PHL"],
+  KEWR: ["EWR", "N90"],
+  KLGA: ["LGA", "N90"],
+  KJFK: ["JFK", "N90"],
+  KBOS: ["BOS", "A90"],
+  KMCO: ["MCO"],
+  KFLL: ["FLL"],
+  KMIA: ["MIA"],
+  KTPA: ["TPA"],
+  KRDU: ["RDU"],
+  KBNA: ["BNA"],
+  KMSY: ["MSY"],
+};
+
 const MANUAL_ROUTES = [
   ...buildManualRoutes("NA", "ASA", [
     ["KSAN", "KLAX", "socal short"], ["KSAN", "KSFO", "socal west"], ["KSAN", "KOAK", "socal west"],
@@ -721,19 +778,52 @@ function renderResults(routes, input) {
   }
 }
 
+function matchesAirportAtc(controller, airportIcao) {
+  const callsign = String(controller.callsign || "").toUpperCase();
+  const suffix = getControllerSuffix(callsign);
+  if (!LOCAL_ATC_SUFFIXES.has(suffix)) {
+    return false;
+  }
+
+  return resolveAtcPrefixes(airportIcao).some((prefix) => callsign.startsWith(`${prefix}_`));
+}
+
+function resolveAtcPrefixes(airportIcao) {
+  const airport = state.airportMap.get(airportIcao);
+  const prefixes = new Set([airportIcao]);
+
+  if (airport?.iata && airport.iata !== "\\N") {
+    prefixes.add(airport.iata);
+  }
+
+  (AIRPORT_ATC_PREFIXES[airportIcao] ?? []).forEach((prefix) => prefixes.add(prefix));
+  return [...prefixes].filter(Boolean);
+}
+
+function getControllerSuffix(callsign) {
+  const match = String(callsign || "").toUpperCase().match(/_([A-Z]+)$/);
+  return match ? match[1] : "";
+}
+
+function isStaffedLocalAtc(callsign) {
+  return STAFFED_ATC_SUFFIXES.has(getControllerSuffix(callsign));
+}
+
 function scoreCoverage(depIcao, arrIcao) {
   const controllers = state.network?.controllers ?? [];
-  const depMatches = controllers.filter((controller) => (controller.callsign ?? "").startsWith(`${depIcao}_`));
-  const arrMatches = controllers.filter((controller) => (controller.callsign ?? "").startsWith(`${arrIcao}_`));
+  const depMatches = controllers.filter((controller) => matchesAirportAtc(controller, depIcao));
+  const arrMatches = controllers.filter((controller) => matchesAirportAtc(controller, arrIcao));
   const centerMatches = controllers.filter((controller) => /_(CTR|APP|DEP)$/.test(controller.callsign ?? ""));
 
-  const depHasTower = depMatches.some((c) => /_(DEL|GND|TWR|APP|DEP)$/.test(c.callsign));
-  const arrHasTower = arrMatches.some((c) => /_(DEL|GND|TWR|APP|DEP)$/.test(c.callsign));
+  const depHasTower = depMatches.some((c) => isStaffedLocalAtc(c.callsign));
+  const arrHasTower = arrMatches.some((c) => isStaffedLocalAtc(c.callsign));
   const enrouteBonus = Math.min(centerMatches.length, 12);
   const depPositions = summarizeAirportPositions(depMatches);
   const arrPositions = summarizeAirportPositions(arrMatches);
 
-  let score = (depMatches.length * 10) + (arrMatches.length * 10) + enrouteBonus;
+  const depStaffedCount = depMatches.filter((controller) => isStaffedLocalAtc(controller.callsign)).length;
+  const arrStaffedCount = arrMatches.filter((controller) => isStaffedLocalAtc(controller.callsign)).length;
+  let score = (depStaffedCount * 10) + (arrStaffedCount * 10) + enrouteBonus;
   let label = "Light coverage";
   let description = "Some controllers are online, but this route would likely have gaps.";
 
@@ -748,8 +838,8 @@ function scoreCoverage(depIcao, arrIcao) {
   }
 
   const chips = [
-    { text: `${depIcao}: ${depMatches.length} local positions`, tone: depMatches.length >= 2 ? "good" : depMatches.length >= 1 ? "warn" : "low" },
-    { text: `${arrIcao}: ${arrMatches.length} local positions`, tone: arrMatches.length >= 2 ? "good" : arrMatches.length >= 1 ? "warn" : "low" },
+    { text: `${depIcao}: ${depStaffedCount} local positions`, tone: depStaffedCount >= 2 ? "good" : depStaffedCount >= 1 ? "warn" : "low" },
+    { text: `${arrIcao}: ${arrStaffedCount} local positions`, tone: arrStaffedCount >= 2 ? "good" : arrStaffedCount >= 1 ? "warn" : "low" },
     { text: `${centerMatches.length} wider enroute APP/CTR positions online`, tone: centerMatches.length >= 8 ? "good" : centerMatches.length >= 3 ? "warn" : "low" },
   ];
 
